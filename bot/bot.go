@@ -1,0 +1,356 @@
+package bot
+
+import (
+	"context"
+	"fmt"
+	"net"
+	"regexp"
+	"strings"
+	"sync"
+	"time"
+
+	"awesome-dragon.science/go/irc/client"
+	"awesome-dragon.science/go/irc/client/event/chatcommand"
+	"awesome-dragon.science/go/irc/client/event/irccommand"
+	"awesome-dragon.science/go/irc/client/event/multi"
+	"awesome-dragon.science/go/irc/client/event/servernotice"
+	"awesome-dragon.science/go/irc/connection"
+	"awesome-dragon.science/go/irc/numerics"
+	"awesome-dragon.science/go/irc/oper"
+	operperm "awesome-dragon.science/go/irc/permissions/oper"
+	"github.com/op/go-logging"
+)
+
+type scanState int
+
+const (
+	scanInProgress scanState = iota
+	scanComplete
+)
+
+//nolint:gochecknoglobals // They're constants but go being go
+var (
+	//nolint:lll // cant be made shorter
+	snoteRe  = regexp.MustCompile(`^\*{3} Notice -- Client connecting: (?P<nick>\S+) \((?P<ident>[^@]+)@(?P<host>[^)]+)\) \[(?P<ip>\S+)\] \{(?P<class>[^}]+)\} <(?P<account>[^>]+)> \[(?P<gecos>.*)\]$`)
+	nickLoc  = snoteRe.SubexpIndex("nick")
+	identLoc = snoteRe.SubexpIndex("ident")
+	hostLoc  = snoteRe.SubexpIndex("host")
+	// accountLog = snoteRe.SubexpIndex("account")
+	ipLoc    = snoteRe.SubexpIndex("ip")
+	gecosLoc = snoteRe.SubexpIndex("gecos")
+
+	matrixRange = func() *net.IPNet {
+		_, out, err := net.ParseCIDR("2001:470:69fc:105::/64")
+		if err != nil {
+			panic(err)
+		}
+
+		return out
+	}()
+)
+
+type scanResult struct {
+	state      scanState
+	homeserver string
+	scanTime   time.Time
+	isOpenReg  bool
+	resultWait chan struct{}
+}
+
+type Config struct {
+	Connection connection.Config
+
+	Nick             string
+	Ident            string
+	Realname         string
+	ScanTimeoutHours int
+
+	OperKeyPath   string
+	OperKeyPasswd string
+	OperName      string
+
+	SASL     bool
+	NSUser   string
+	NSPasswd string
+}
+
+type Bot struct {
+	irc           *client.Client
+	config        *Config
+	ircLogChan    string
+	log           *logging.Logger
+	mu            sync.Mutex
+	cache         map[string]*scanResult
+	cacheStopChan chan struct{}
+
+	// Handlers
+	multiHandler   *multi.Handler
+	ircHandler     *irccommand.Handler
+	snoteHandler   *servernotice.Handler
+	commandHandler *chatcommand.Handler
+
+	// connectedChan  chan struct{}
+}
+
+// New creates a new bot instance.
+func New(config *Config, ircLogChan string, log *logging.Logger) *Bot {
+	b := &Bot{
+		irc: client.New(&client.Config{
+			Connection:   config.Connection,
+			Nick:         config.Nick,
+			Username:     config.Ident,
+			Realname:     config.Realname,
+			SASLUsername: config.NSUser,
+			SASLPassword: config.NSPasswd,
+			RequestedCapabilities: []string{
+				"sasl", "account-tag", "solanum.chat/identify-msg", "solanum.chat/oper", "solanum.chat/realhost",
+			},
+		}),
+		ircLogChan:    ircLogChan,
+		log:           log,
+		cache:         make(map[string]*scanResult),
+		cacheStopChan: make(chan struct{}),
+		// connectedChan: make(chan struct{}),
+		config: config,
+	}
+
+	go b.cacheLoop(b.cacheStopChan)
+
+	b.setupHandlers()
+	b.setupCommands()
+
+	return b
+}
+
+func (b *Bot) setupHandlers() {
+	b.multiHandler = &multi.Handler{}
+	b.ircHandler = &irccommand.Handler{}     // for general stuff
+	b.snoteHandler = &servernotice.Handler{} // to handle server notices
+
+	b.snoteHandler.RegisterCallback(b.onSnote)
+
+	b.multiHandler.AddHandlers(b.ircHandler, b.snoteHandler)
+	b.irc.SetMessageHandler(b.multiHandler)
+}
+
+func (b *Bot) onSnote(d *servernotice.SnoteData) error {
+	match := snoteRe.FindStringSubmatch(d.Message)
+	if match == nil {
+		return nil
+	}
+
+	ip := net.ParseIP(match[ipLoc])
+	if ip == nil {
+		b.log.Warningf("Unable to parse %q as an IP address", ip)
+
+		return nil
+	}
+
+	if !matrixRange.Contains(ip) {
+		// Not a matrix conn
+		return nil
+	}
+
+	go b.onMatrixConnection(
+		match[nickLoc], match[identLoc], match[hostLoc], match[ipLoc], match[gecosLoc],
+	)
+
+	return nil
+}
+
+func (b *Bot) setupCommands() {
+	b.commandHandler = &chatcommand.Handler{
+		Prefix:      "~",
+		MessageFunc: b.irc.SendNotice,
+		PermissionHandler: &operperm.Handler{
+			Opers: []operperm.Oper{
+				{
+					Name:        "*",
+					Permissions: []string{"bot.admin"},
+				},
+			},
+		},
+	}
+
+	_ = b.commandHandler.AddCommand(
+		"shutdown",
+		"shutdown the bot",
+		[]string{"bot.admin"},
+		-1,
+		func(a *chatcommand.Argument) error {
+			b.Stop(a.ArgString())
+
+			return nil
+		},
+	)
+
+	b.multiHandler.AddHandlers(b.commandHandler)
+}
+
+// Run starts the bot and connects it to IRC
+func (b *Bot) Run(ctx context.Context) {
+	go func() {
+		if err := (b.irc.Run(ctx)); err != nil {
+			b.log.Errorf("Error from client.Run: %s", err)
+		}
+	}()
+
+	<-b.ircHandler.WaitFor(numerics.RPL_WELCOME)
+
+	// if err := b.oper(); err != nil {
+	// 	b.log.Fatalf("Could not oper up: %s", err)
+	// }
+
+	_ = b.irc.WriteIRC("JOIN", b.ircLogChan)
+
+	b.irc.WaitForExit()
+}
+
+func (b *Bot) oper() error {
+	c, err := oper.NewChallenge(b.config.OperKeyPath, b.config.OperKeyPasswd)
+	if err != nil {
+		return fmt.Errorf("could not create CHALLENGE: %w", err)
+	}
+
+	sh := &irccommand.SimpleHandler{}
+
+	b.multiHandler.AddHandlers(sh)
+	defer b.multiHandler.RemoveHandler(sh)
+
+	if err := c.DoChallenge(sh, b.irc.WriteIRC, b.config.OperName); err != nil {
+		return fmt.Errorf("could not oper: %w", err)
+	}
+
+	return nil
+}
+
+func (b *Bot) homeServerState(homeserver string) (*scanResult, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	lowered := strings.ToLower(homeserver)
+
+	res, ok := b.cache[lowered]
+	if !ok {
+		newResult := &scanResult{
+			homeserver: homeserver,
+			state:      scanInProgress,
+			resultWait: make(chan struct{}),
+		}
+
+		return newResult, true
+	}
+
+	return res, false
+}
+
+func (b *Bot) logToChannelf(format string, args ...interface{}) {
+	b.logToChannel(fmt.Sprintf(format, args...))
+}
+
+func (b *Bot) logToChannel(msg string) {
+	if err := b.irc.SendMessage(b.ircLogChan, msg); err != nil {
+		b.log.Errorf("Unable to log %q to %q: %s", msg, b.ircLogChan, err)
+	}
+}
+
+func (b *Bot) onMatrixConnection(nick, ident, host, ip, realname string) {
+	hs := realnameToHomeserver(realname)
+	userLog := fmt.Sprintf("%s!%s@%s (%s | %s)", nick, ident, host, ip, realname)
+
+	if hs == "" {
+		b.log.Errorf("Could not convert %q to homeserver name", realname)
+		b.logToChannelf("ERR: Invalid homeserver in realname %q (for %s)", realname, userLog)
+
+		return
+	}
+
+	scanResult, newlyCreated := b.homeServerState(hs)
+	if newlyCreated {
+		// this was created for us, and thus we need to do a scan
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
+		defer cancel()
+
+		res, err := b.scan(ctx, hs)
+
+		defer close(scanResult.resultWait)
+
+		if err != nil {
+			b.log.Errorf("Could not scan homeserver %q: %s", hs, err)
+
+			go b.logToChannelf("ERR: Homeserver %q errored while scanning: %s", hs, err)
+
+			res = false
+		}
+
+		scanResult.isOpenReg = res
+		scanResult.scanTime = time.Now()
+		scanResult.state = scanComplete
+	}
+
+	if scanResult.state == scanInProgress {
+		<-scanResult.resultWait
+	}
+
+	if scanResult.isOpenReg {
+		b.logToChannelf(
+			"BAD: Matrix homeserver %q allows for unverified registration (based on connecting user %s)",
+			hs,
+			userLog,
+		)
+
+		b.xlineHomeserver(hs)
+	}
+}
+
+func (b *Bot) checkCaches() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	for name, c := range b.cache {
+		if c.state == scanComplete && time.Since(c.scanTime) >= time.Hour*time.Duration(b.config.ScanTimeoutHours) {
+			delete(b.cache, name)
+		}
+	}
+}
+
+func (b *Bot) cacheLoop(stop <-chan struct{}) {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			b.checkCaches()
+		case <-stop:
+			return
+		}
+	}
+}
+
+func (b *Bot) scan(ctx context.Context, homeserver string) (bool, error) {
+	return badHomeServer(ctx, homeserver)
+}
+
+func (b *Bot) xlineHomeserver(hs string) {
+	b.log.Infof("X-Lining homeserver %s", hs)
+}
+
+func realnameToHomeserver(realname string) string {
+	// this is started in a goroutine, so we dont return anything here
+	if realname == "" || realname[0] != '@' {
+		return ""
+	}
+
+	if !strings.Contains(realname, ":") {
+		return ""
+	}
+
+	split := strings.Split(realname, ":")
+
+	return split[len(split)-1]
+}
+
+func (b *Bot) Stop(message string) {
+	b.irc.Stop(message)
+}
