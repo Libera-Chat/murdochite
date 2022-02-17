@@ -1,4 +1,4 @@
-module awesome-dragon.science/go/mls
+module awesome-dragon.science/go/murdochite
 
 go 1.17
 
@@ -9,6 +9,7 @@ require (
 
 require (
 	github.com/ergochat/irc-go v0.0.0-20211003214124-0e1b7ad1b94f // indirect
+	github.com/pelletier/go-toml/v2 v2.0.0-beta.6
 	github.com/youmark/pkcs8 v0.0.0-20201027041543-1326539a0a0a // indirect
 	golang.org/x/crypto v0.0.0-20200302210943-78000ba7a073 // indirect
 )
