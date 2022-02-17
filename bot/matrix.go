@@ -9,7 +9,7 @@ import (
 	"net/url"
 	"strings"
 
-	"awesome-dragon.science/go/mls/bot/internal/set"
+	"awesome-dragon.science/go/murdochite/bot/internal/set"
 	"github.com/op/go-logging"
 )
 
@@ -20,11 +20,6 @@ const (
 	smallLimit = 1 << 14
 	bigLimit   = 1 << 16
 )
-
-var checks = []*set.StringSet{
-	set.New("m.login.dummy"),
-	set.New("m.login.dummy", "m.login.recaptcha"),
-}
 
 var log = logging.MustGetLogger("matrix")
 
@@ -47,9 +42,9 @@ func stageMatchesAny(stage []string, toCheck ...*set.StringSet) bool {
 	return false
 }
 
-func (r *registerResult) allowsUnverifiedRegistration() bool {
+func (r *registerResult) allowsUnverifiedRegistration(badflows []*set.StringSet) bool {
 	for _, flow := range r.Flows {
-		if stageMatchesAny(flow.Stages, checks...) {
+		if stageMatchesAny(flow.Stages, badflows...) {
 			return true
 		}
 	}
@@ -58,7 +53,7 @@ func (r *registerResult) allowsUnverifiedRegistration() bool {
 }
 
 // returns true if the homeserver allows unverified registration
-func badHomeServer(ctx context.Context, location string) (bool, error) {
+func badHomeServer(ctx context.Context, location string, badFlows []*set.StringSet) (bool, error) {
 	if !strings.HasPrefix(location, "http") {
 		location = "https://" + location
 	}
@@ -98,7 +93,7 @@ func badHomeServer(ctx context.Context, location string) (bool, error) {
 
 	log.Debugf("Unmarshalled: %v", regData)
 
-	return regData.allowsUnverifiedRegistration(), nil
+	return regData.allowsUnverifiedRegistration(badFlows), nil
 }
 
 func getHomeserverLocation(ctx context.Context, location string) (string, error) {

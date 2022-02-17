@@ -10,11 +10,12 @@ import (
 	"time"
 
 	"awesome-dragon.science/go/irc/client"
-	"awesome-dragon.science/go/irc/client/event/chatcommand"
-	"awesome-dragon.science/go/irc/client/event/irccommand"
-	"awesome-dragon.science/go/irc/client/event/multi"
-	"awesome-dragon.science/go/irc/client/event/servernotice"
 	"awesome-dragon.science/go/irc/connection"
+	"awesome-dragon.science/go/irc/event/chatcommand"
+	"awesome-dragon.science/go/irc/event/irccommand"
+	"awesome-dragon.science/go/irc/event/multi"
+	"awesome-dragon.science/go/irc/event/servernotice"
+
 	"awesome-dragon.science/go/irc/numerics"
 	"awesome-dragon.science/go/irc/oper"
 	operperm "awesome-dragon.science/go/irc/permissions/oper"
@@ -58,30 +59,31 @@ type scanResult struct {
 }
 
 type Config struct {
-	Connection connection.Config
+	Connection connection.Config `toml:"connection"`
 
-	Nick             string
-	Ident            string
-	Realname         string
-	ScanTimeoutHours int
+	Nick             string     `toml:"nick"`
+	Ident            string     `toml:"ident"`
+	Realname         string     `toml:"realname"`
+	ScanTimeoutHours int        `toml:"scan_timeout_hours"`
+	BadFlows         [][]string `toml:"bad_flows"`
 
-	OperKeyPath   string
-	OperKeyPasswd string
-	OperName      string
+	OperKeyPath   string `toml:"oper_key_path"`
+	OperKeyPasswd string `toml:"oper_key_passwd"`
+	OperName      string `toml:"oper_name"`
 
-	SASL     bool
-	NSUser   string
-	NSPasswd string
+	NSUser   string `toml:"ns_user"`
+	NSPasswd string `toml:"ns_passwd"`
 }
 
 type Bot struct {
-	irc           *client.Client
-	config        *Config
-	ircLogChan    string
-	log           *logging.Logger
-	mu            sync.Mutex
-	cache         map[string]*scanResult
-	cacheStopChan chan struct{}
+	irc        *client.Client
+	config     *Config
+	ircLogChan string
+	log        *logging.Logger
+
+	mu       sync.Mutex
+	cache    map[string]*scanResult
+	badFlows []*set.StringSet
 
 	// Handlers
 	multiHandler   *multi.Handler
@@ -94,6 +96,12 @@ type Bot struct {
 
 // New creates a new bot instance.
 func New(config *Config, ircLogChan string, log *logging.Logger) *Bot {
+	badflows := []*set.StringSet{}
+
+	for _, f := range config.BadFlows {
+		badflows = append(badflows, set.New(f...))
+	}
+
 	b := &Bot{
 		irc: client.New(&client.Config{
 			Connection:   config.Connection,
@@ -106,15 +114,18 @@ func New(config *Config, ircLogChan string, log *logging.Logger) *Bot {
 				"sasl", "account-tag", "solanum.chat/identify-msg", "solanum.chat/oper", "solanum.chat/realhost",
 			},
 		}),
-		ircLogChan:    ircLogChan,
-		log:           log,
-		cache:         make(map[string]*scanResult),
-		cacheStopChan: make(chan struct{}),
-		// connectedChan: make(chan struct{}),
-		config: config,
+		ircLogChan: ircLogChan,
+		log:        log,
+		cache:      make(map[string]*scanResult),
+		badFlows:   badflows,
+		config:     config,
 	}
 
-	go b.cacheLoop(b.cacheStopChan)
+	if b.config.ScanTimeoutHours == 0 {
+		b.config.ScanTimeoutHours = 1
+	}
+
+	go b.cacheLoop(b.irc.DoneChan())
 
 	b.setupHandlers()
 	b.setupCommands()
@@ -329,7 +340,7 @@ func (b *Bot) cacheLoop(stop <-chan struct{}) {
 }
 
 func (b *Bot) scan(ctx context.Context, homeserver string) (bool, error) {
-	return badHomeServer(ctx, homeserver)
+	return badHomeServer(ctx, homeserver, b.badFlows)
 }
 
 func (b *Bot) xlineHomeserver(hs string) {
