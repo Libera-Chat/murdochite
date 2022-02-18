@@ -11,14 +11,16 @@ import (
 
 	"awesome-dragon.science/go/irc/client"
 	"awesome-dragon.science/go/irc/connection"
+	"awesome-dragon.science/go/irc/event"
 	"awesome-dragon.science/go/irc/event/chatcommand"
+	"awesome-dragon.science/go/irc/event/function"
 	"awesome-dragon.science/go/irc/event/irccommand"
 	"awesome-dragon.science/go/irc/event/multi"
 	"awesome-dragon.science/go/irc/event/servernotice"
-
 	"awesome-dragon.science/go/irc/numerics"
 	"awesome-dragon.science/go/irc/oper"
 	operperm "awesome-dragon.science/go/irc/permissions/oper"
+	"awesome-dragon.science/go/murdochite/bot/internal/set"
 	"github.com/op/go-logging"
 )
 
@@ -73,6 +75,9 @@ type Config struct {
 
 	NSUser   string `toml:"ns_user"`
 	NSPasswd string `toml:"ns_passwd"`
+
+	XLineDuration int    `toml:"xline_duration"`
+	XlineMessage  string `toml:"xline_message"`
 }
 
 type Bot struct {
@@ -90,8 +95,6 @@ type Bot struct {
 	ircHandler     *irccommand.Handler
 	snoteHandler   *servernotice.Handler
 	commandHandler *chatcommand.Handler
-
-	// connectedChan  chan struct{}
 }
 
 // New creates a new bot instance.
@@ -100,6 +103,14 @@ func New(config *Config, ircLogChan string, log *logging.Logger) *Bot {
 
 	for _, f := range config.BadFlows {
 		badflows = append(badflows, set.New(f...))
+	}
+
+	if config.XLineDuration == 0 {
+		config.XLineDuration = 60 * 24 * 30 // 1 month
+	}
+
+	if config.XlineMessage == "" {
+		config.XlineMessage = "Your homeserver appears to allow unverified registration."
 	}
 
 	b := &Bot{
@@ -141,6 +152,20 @@ func (b *Bot) setupHandlers() {
 	b.snoteHandler.RegisterCallback(b.onSnote)
 
 	b.multiHandler.AddHandlers(b.ircHandler, b.snoteHandler)
+	b.multiHandler.AddHandlers(function.FuncHandler(func(msg *event.Message) error {
+		if msg.Raw.Command != numerics.PRIVMSG {
+			return nil
+		}
+
+		if msg.Raw.Params[0] != msg.CurrentNick {
+			return nil
+		}
+
+		b.logToChannelf("PV: %s %s", msg.SourceUser.Mask(), msg.Raw.Params[len(msg.Raw.Params)-1])
+
+		return nil
+	}))
+
 	b.irc.SetMessageHandler(b.multiHandler)
 }
 
@@ -177,7 +202,7 @@ func (b *Bot) setupCommands() {
 			Opers: []operperm.Oper{
 				{
 					Name:        "*",
-					Permissions: []string{"bot.admin"},
+					Permissions: []string{"bot.admin", "bot.scan"},
 				},
 			},
 		},
@@ -193,6 +218,10 @@ func (b *Bot) setupCommands() {
 
 			return nil
 		},
+	)
+
+	_ = b.commandHandler.AddCommand(
+		"scan", "Check the given homeserver for unverified registration", []string{"bot.scan"}, 1, b.manualScan,
 	)
 
 	b.multiHandler.AddHandlers(b.commandHandler)
@@ -345,6 +374,31 @@ func (b *Bot) scan(ctx context.Context, homeserver string) (bool, error) {
 
 func (b *Bot) xlineHomeserver(hs string) {
 	b.log.Infof("X-Lining homeserver %s", hs)
+}
+
+func xlineEscape(s string) string {
+	out := strings.Builder{}
+	/*[08:31:40] * xline :The <gecos> field contains certain special characters:
+	[08:31:40] * xline :  ? - Match any single character
+	[08:31:40] * xline :  * - Many any characters
+	[08:31:40] * xline :  @ - Match any letter [A-Za-z]
+	[08:31:40] * xline :  # - Match any digit [0-9] */
+	for _, r := range s {
+		switch r {
+		case '\\', '?', '*', '@', '#':
+			out.WriteRune('\\')
+			out.WriteRune(r)
+
+		case ' ':
+			out.WriteRune('\\')
+			out.WriteRune('s')
+
+		default:
+			out.WriteRune(r)
+		}
+	}
+
+	return out.String()
 }
 
 func realnameToHomeserver(realname string) string {
