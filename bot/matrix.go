@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -54,13 +55,22 @@ func (r *registerResult) allowsUnverifiedRegistration(badflows []*set.StringSet)
 
 // returns true if the homeserver allows unverified registration
 func badHomeServer(ctx context.Context, location string, badFlows []*set.StringSet) (bool, error) {
+	regData, err := getRegistrationData(ctx, location)
+	if err != nil {
+		return false, err
+	}
+
+	return regData.allowsUnverifiedRegistration(badFlows), nil
+}
+
+func getRegistrationData(ctx context.Context, location string) (*registerResult, error) {
 	if !strings.HasPrefix(location, "http") {
 		location = "https://" + location
 	}
 
 	realHomeserverLocation, err := getHomeserverLocation(ctx, location)
 	if err != nil {
-		return false, err
+		return nil, fmt.Errorf("unable to get homeserver's true location: %w", err)
 	}
 
 	log.Debugf("Real location: %q", realHomeserverLocation)
@@ -69,37 +79,35 @@ func badHomeServer(ctx context.Context, location string, badFlows []*set.StringS
 		ctx, "POST", realHomeserverLocation+registrationEndpoint, strings.NewReader("{}"),
 	)
 	if err != nil {
-		return false, err
+		return nil, fmt.Errorf("unable to create request: %w", err)
 	}
 
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return false, err
+		return nil, fmt.Errorf("unable to make POST request: %w", err)
 	}
+
+	defer res.Body.Close()
 
 	data, err := io.ReadAll(io.LimitReader(res.Body, bigLimit))
 	if err != nil {
-		return false, err
+		return nil, fmt.Errorf("unable to read HTTP body: %w", err)
 	}
-
-	log.Debugf("Resulting data: %q", string(data))
 
 	regData := &registerResult{}
 
 	if err := json.Unmarshal(data, regData); err != nil {
 		// The json was somehow invalid, drop the error
-		return false, err
+		return nil, fmt.Errorf("could not unmarshal registration data: %w", err)
 	}
 
-	log.Debugf("Unmarshalled: %v", regData)
-
-	return regData.allowsUnverifiedRegistration(badFlows), nil
+	return regData, nil
 }
 
 func getHomeserverLocation(ctx context.Context, location string) (string, error) {
 	log.Debugf("Getting %q\n", location+wellKnownFile)
 
-	request, err := http.NewRequestWithContext(ctx, "GET", location+wellKnownFile, nil)
+	request, err := http.NewRequestWithContext(ctx, "GET", location+wellKnownFile, http.NoBody)
 	if err != nil {
 		return "", err
 	}
