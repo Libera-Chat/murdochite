@@ -178,7 +178,7 @@ func (b *Bot) onSnote(d *servernotice.SnoteData) error {
 
 	ip := net.ParseIP(match[ipLoc])
 	if ip == nil {
-		b.log.Warningf("Unable to parse %q as an IP address", ip)
+		// b.log.Warningf("Unable to parse %q as an IP address", ip)
 
 		return nil
 	}
@@ -228,6 +228,8 @@ func (b *Bot) setupCommands() {
 	_ = b.commandHandler.AddCommand(
 		"Status", "Return general status about the bot", []string{"bot.status"}, -1, b.statuscmd,
 	)
+
+	_ = b.commandHandler.AddCommand("togglerawlog", "toggle console raw log", []string{"bot.admin"}, 0, b.toggleRawLog)
 
 	b.multiHandler.AddHandlers(b.commandHandler)
 }
@@ -304,8 +306,10 @@ func (b *Bot) logToChannel(msg string) {
 }
 
 func (b *Bot) onMatrixConnection(nick, ident, host, ip, realname string) {
-	hs := realnameToHomeserver(realname)
 	userLog := fmt.Sprintf("%s!%s@%s (%s | %s)", nick, ident, host, ip, realname)
+	b.log.Infof("New matrix connection: %s", userLog)
+
+	hs := realnameToHomeserver(realname)
 
 	if hs == "" {
 		b.log.Errorf("Could not convert %q to homeserver name", realname)
@@ -320,6 +324,7 @@ func (b *Bot) onMatrixConnection(nick, ident, host, ip, realname string) {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 		defer cancel()
 
+		b.log.Infof("Scanning homeserver %q...", hs)
 		res, err := b.scan(ctx, hs)
 
 		defer close(scanResult.resultWait)
@@ -338,6 +343,7 @@ func (b *Bot) onMatrixConnection(nick, ident, host, ip, realname string) {
 	}
 
 	if scanResult.state == scanInProgress {
+		b.log.Debugf("Scan for %s already in progress, waiting", hs)
 		<-scanResult.resultWait
 	}
 
