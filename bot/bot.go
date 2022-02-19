@@ -97,6 +97,8 @@ type Bot struct {
 	ircHandler     *irccommand.Handler
 	snoteHandler   *servernotice.Handler
 	commandHandler *chatcommand.Handler
+
+	ShouldRestart bool
 }
 
 // New creates a new bot instance.

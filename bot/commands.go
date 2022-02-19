@@ -2,10 +2,8 @@ package bot
 
 import (
 	"context"
-	"os"
 	"runtime"
 	"strings"
-	"syscall"
 	"time"
 
 	"awesome-dragon.science/go/irc/event/chatcommand"
@@ -81,23 +79,8 @@ func (b *Bot) toggleRawLog(a *chatcommand.Argument) error {
 }
 
 func (b *Bot) restartCmd(*chatcommand.Argument) error {
-	go func() {
-		b.logToChannelf("restarting...")
-
-		b.Stop("Restarting")
-		select {
-		case <-b.irc.DoneChan():
-		case <-time.After(time.Millisecond * 500):
-		}
-
-		exe, err := os.Executable()
-		if err != nil {
-			panic(err)
-		}
-
-		panic(syscall.Exec(exe, os.Args[1:], os.Environ()))
-	}()
-
+	b.ShouldRestart = true
+	b.Stop("Restarting...")
 	return nil
 }
 

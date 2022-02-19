@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"syscall"
 
 	"awesome-dragon.science/go/murdochite/bot"
 	"github.com/op/go-logging"
@@ -35,4 +36,13 @@ func main() {
 	b := bot.New(&config, logging.MustGetLogger("bot"))
 
 	b.Run(context.Background())
+
+	if b.ShouldRestart {
+		exe, err := os.Executable()
+		if err != nil {
+			panic(err)
+		}
+
+		panic(syscall.Exec(exe, os.Args, os.Environ()))
+	}
 }
