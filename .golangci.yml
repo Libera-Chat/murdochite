@@ -25,6 +25,7 @@ linters-settings:
 linters:
   enable-all: true
   disable:
+    - gci
     - gochecknoinits
     - gochecknoglobals
     - maligned
