@@ -203,7 +203,7 @@ func (b *Bot) setupCommands() {
 			Opers: []operperm.Oper{
 				{
 					Name:        "*",
-					Permissions: []string{"bot.admin", "bot.scan"},
+					Permissions: []string{"bot.admin", "bot.scan", "bot.status"},
 				},
 			},
 		},
@@ -223,6 +223,10 @@ func (b *Bot) setupCommands() {
 
 	_ = b.commandHandler.AddCommand(
 		"scan", "Check the given homeserver for unverified registration", []string{"bot.scan"}, 1, b.manualScan,
+	)
+
+	_ = b.commandHandler.AddCommand(
+		"Status", "Return general status about the bot", []string{"bot.status"}, -1, b.statuscmd,
 	)
 
 	b.multiHandler.AddHandlers(b.commandHandler)
