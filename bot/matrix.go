@@ -98,6 +98,14 @@ func getRegistrationData(ctx context.Context, location string) (*registerResult,
 
 	if err := json.Unmarshal(data, regData); err != nil {
 		// The json was somehow invalid, drop the error
+
+		toSend := data
+		if len(toSend) > 128 {
+			toSend = toSend[:128]
+		}
+
+		log.Debugf("Bad json; Data as follows:\n\t%s", toSend)
+
 		return nil, fmt.Errorf("could not unmarshal registration data: %w", err)
 	}
 
@@ -133,6 +141,8 @@ func getHomeserverLocation(ctx context.Context, location string) (string, error)
 	defer result.Body.Close()
 
 	if result.StatusCode != 200 {
+		log.Debugf("Assuming %q has no well known for location", location)
+
 		return location, nil
 	}
 
