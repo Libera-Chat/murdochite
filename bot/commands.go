@@ -64,9 +64,18 @@ func (b *Bot) statuscmd(a *chatcommand.Argument) error {
 
 	a.Replyf(
 		"Bot status: \x02%d\x02 goroutines | \x02%d\x02 cached homeservers | "+
-			"\x02%d\x02 scans in progress | \x02%d\x02 scans completed",
-		runtime.NumGoroutine(), cacheSize, progress, completed,
+			"\x02%d\x02 scans in progress | \x02%d\x02 scans completed | cache entries cleared after \x02%d\x02 hours",
+		runtime.NumGoroutine(), cacheSize, progress, completed, b.config.ScanTimeoutHours,
 	)
 
 	return nil
 }
+
+func (b *Bot) toggleRawLog(a *chatcommand.Argument) error {
+	b.log.Infof("Raw log toggled by %s", a.SourceUser.Mask())
+	b.logToChannelf("Raw log toggled by %s", a.SourceUser.Mask())
+	b.irc.ToggleRawLog()
+	return nil
+}
+
+// TODO: getcache, dropcache
