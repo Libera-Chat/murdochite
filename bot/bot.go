@@ -230,6 +230,7 @@ func (b *Bot) setupCommands() {
 	)
 
 	_ = b.commandHandler.AddCommand("togglerawlog", "toggle console raw log", []string{"bot.admin"}, 0, b.toggleRawLog)
+	_ = b.commandHandler.AddCommand("restart", "restarts the bot", []string{"bot.admin"}, 0, b.restartCmd)
 
 	b.multiHandler.AddHandlers(b.commandHandler)
 }
