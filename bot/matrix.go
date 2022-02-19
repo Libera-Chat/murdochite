@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -53,6 +54,14 @@ func (r *registerResult) allowsUnverifiedRegistration(badflows []*set.StringSet)
 	return false
 }
 
+func getClient() *http.Client {
+	return &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // its intentional
+		},
+	}
+}
+
 // returns true if the homeserver allows unverified registration
 func badHomeServer(ctx context.Context, location string, badFlows []*set.StringSet) (bool, error) {
 	regData, err := getRegistrationData(ctx, location)
@@ -82,7 +91,7 @@ func getRegistrationData(ctx context.Context, location string) (*registerResult,
 		return nil, fmt.Errorf("unable to create request: %w", err)
 	}
 
-	res, err := http.DefaultClient.Do(req)
+	res, err := getClient().Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("unable to make POST request: %w", err)
 	}
@@ -120,7 +129,7 @@ func getHomeserverLocation(ctx context.Context, location string) (string, error)
 		return "", err
 	}
 
-	result, err := http.DefaultClient.Do(request)
+	result, err := getClient().Do(request)
 	if err != nil {
 		urlErr := &url.Error{}
 
