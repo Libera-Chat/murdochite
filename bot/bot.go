@@ -66,8 +66,10 @@ type Config struct {
 	Nick             string     `toml:"nick"`
 	Ident            string     `toml:"ident"`
 	Realname         string     `toml:"realname"`
+	ServerPassword   string     `toml:"server_password"`
 	ScanTimeoutHours int        `toml:"scan_timeout_hours"`
 	BadFlows         [][]string `toml:"bad_flows"`
+	LogChannel       string     `toml:"log_channel"`
 
 	OperKeyPath   string `toml:"oper_key_path"`
 	OperKeyPasswd string `toml:"oper_key_passwd"`
@@ -98,7 +100,7 @@ type Bot struct {
 }
 
 // New creates a new bot instance.
-func New(config *Config, ircLogChan string, log *logging.Logger) *Bot {
+func New(config *Config, log *logging.Logger) *Bot {
 	badflows := []*set.StringSet{}
 
 	for _, f := range config.BadFlows {
@@ -115,17 +117,18 @@ func New(config *Config, ircLogChan string, log *logging.Logger) *Bot {
 
 	b := &Bot{
 		irc: client.New(&client.Config{
-			Connection:   config.Connection,
-			Nick:         config.Nick,
-			Username:     config.Ident,
-			Realname:     config.Realname,
-			SASLUsername: config.NSUser,
-			SASLPassword: config.NSPasswd,
+			Connection:     config.Connection,
+			ServerPassword: config.ServerPassword,
+			Nick:           config.Nick,
+			Username:       config.Ident,
+			Realname:       config.Realname,
+			SASLUsername:   config.NSUser,
+			SASLPassword:   config.NSPasswd,
 			RequestedCapabilities: []string{
 				"sasl", "account-tag", "solanum.chat/identify-msg", "solanum.chat/oper", "solanum.chat/realhost",
 			},
 		}),
-		ircLogChan: ircLogChan,
+		ircLogChan: config.LogChannel,
 		log:        log,
 		cache:      make(map[string]*scanResult),
 		badFlows:   badflows,
@@ -135,8 +138,6 @@ func New(config *Config, ircLogChan string, log *logging.Logger) *Bot {
 	if b.config.ScanTimeoutHours == 0 {
 		b.config.ScanTimeoutHours = 1
 	}
-
-	go b.cacheLoop(b.irc.DoneChan())
 
 	b.setupHandlers()
 	b.setupCommands()
@@ -237,9 +238,11 @@ func (b *Bot) Run(ctx context.Context) {
 
 	<-b.ircHandler.WaitFor(numerics.RPL_WELCOME)
 
-	// if err := b.oper(); err != nil {
-	// 	b.log.Fatalf("Could not oper up: %s", err)
-	// }
+	go b.cacheLoop(b.irc.DoneChan())
+
+	if err := b.oper(); err != nil {
+		b.log.Fatalf("Could not oper up: %s", err)
+	}
 
 	_ = b.irc.WriteIRC("JOIN", b.ircLogChan)
 
