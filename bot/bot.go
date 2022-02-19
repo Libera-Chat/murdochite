@@ -285,6 +285,8 @@ func (b *Bot) homeServerState(homeserver string) (*scanResult, bool) {
 			resultWait: make(chan struct{}),
 		}
 
+		b.cache[lowered] = newResult
+
 		return newResult, true
 	}
 
