@@ -15,7 +15,7 @@ var Version = "Unknown"
 
 func main() {
 	//nolint:lll,misspell // cannot be shortened, and I'd love to spell correctly but the dev was apparently american.
-	const format = "%{color}[%{time:15:04:05.0000}] [%{level: -8s}]%{color:reset} [%{module: -15s}] [%{shortfile: -15s}] %{message}"
+	const format = "%{color}[%{time:15:04:05.0000}] [%{level: -8s}]%{color:reset} [%{module: -15s}] [%{shortfile: -20s}] %{message}"
 
 	logging.SetFormatter(logging.MustStringFormatter(format))
 	logging.SetBackend(logging.NewLogBackend(os.Stdout, "", 0))
