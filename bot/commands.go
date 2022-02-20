@@ -33,8 +33,8 @@ func (b *Bot) manualScan(a *chatcommand.Argument) error {
 			)
 		}
 
-		for _, flow := range res.Flows {
-			b.logToChannelf("MANUAL: %s", strings.Join(flow.Stages, ", "))
+		for i, flow := range res.Flows {
+			b.logToChannelf("MANUAL: Flow %d:  %s", i, strings.Join(flow.Stages, ", "))
 		}
 
 		_, _ = res, err
