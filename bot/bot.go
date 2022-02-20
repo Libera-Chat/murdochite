@@ -402,6 +402,8 @@ func (b *Bot) scan(ctx context.Context, homeserver string) (bool, error) {
 
 func (b *Bot) xlineHomeserver(hs string) {
 	b.log.Infof("X-Lining homeserver %s", hs)
+	escapedHomeserver := xlineEscape(hs)
+	b.logToChannelf("Would issue: XLINE %d %s :%s", b.config.XLineDuration, escapedHomeserver, b.config.XlineMessage)
 }
 
 func xlineEscape(s string) string {
@@ -411,6 +413,7 @@ func xlineEscape(s string) string {
 	[08:31:40] * xline :  * - Many any characters
 	[08:31:40] * xline :  @ - Match any letter [A-Za-z]
 	[08:31:40] * xline :  # - Match any digit [0-9] */
+
 	for _, r := range s {
 		switch r {
 		case '\\', '?', '*', '@', '#':
