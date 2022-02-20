@@ -69,6 +69,12 @@ func badHomeServer(ctx context.Context, location string, badFlows []*set.StringS
 		return false, err
 	}
 
+	log.Debugf("Homeserver at %s has the following flows:", location)
+
+	for i, f := range regData.Flows {
+		log.Debugf("\t %02d: %s", i, strings.Join(f.Stages, ", "))
+	}
+
 	return regData.allowsUnverifiedRegistration(badFlows), nil
 }
 
