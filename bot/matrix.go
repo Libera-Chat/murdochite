@@ -72,6 +72,8 @@ func badHomeServer(ctx context.Context, location string, badFlows []*set.StringS
 	return regData.allowsUnverifiedRegistration(badFlows), nil
 }
 
+var err404 = errors.New("404 while getting registration")
+
 func getRegistrationData(ctx context.Context, location string) (*registerResult, error) {
 	if !strings.HasPrefix(location, "http") {
 		location = "https://" + location
@@ -94,6 +96,10 @@ func getRegistrationData(ctx context.Context, location string) (*registerResult,
 	res, err := getClient().Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("unable to make POST request: %w", err)
+	}
+
+	if res.StatusCode == 404 {
+		return nil, err404
 	}
 
 	defer res.Body.Close()

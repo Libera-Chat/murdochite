@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"regexp"
@@ -335,7 +336,9 @@ func (b *Bot) onMatrixConnection(nick, ident, host, ip, realname string) {
 		if err != nil {
 			b.log.Errorf("Could not scan homeserver %q: %s", hs, err)
 
-			go b.logToChannelf("ERR: Homeserver %q errored while scanning: %s", hs, err)
+			if !errors.Is(err, err404) {
+				go b.logToChannelf("ERR: Homeserver %q errored while scanning: %s", hs, err)
+			}
 
 			res = false
 		}
