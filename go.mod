@@ -3,7 +3,7 @@ module awesome-dragon.science/go/murdochite
 go 1.17
 
 require (
-	awesome-dragon.science/go/irc v0.0.0-20220219000001-2530e71fc37c
+	awesome-dragon.science/go/irc v0.0.0-20220219013437-1f31359e08c6
 	github.com/op/go-logging v0.0.0-20160315200505-970db520ece7
 	github.com/pelletier/go-toml/v2 v2.0.0-beta.6
 )
