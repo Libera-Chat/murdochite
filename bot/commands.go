@@ -29,7 +29,7 @@ func (b *Bot) manualScan(a *chatcommand.Argument) error {
 		if res.allowsUnverifiedRegistration(b.badFlows) {
 			b.logToChannelf("MANUAL: Allows unverified registration")
 			b.logToChannelf(
-				"MANUAL: /quote XLINE %d %s :%s", b.config.XLineDuration, xlineEscape(hs), b.config.XlineMessage,
+				"MANUAL: /quote XLINE %d %s :%s", b.config.XLineDuration, generateXLineTarget(hs), b.config.XlineMessage,
 			)
 		}
 

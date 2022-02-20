@@ -402,8 +402,11 @@ func (b *Bot) scan(ctx context.Context, homeserver string) (bool, error) {
 
 func (b *Bot) xlineHomeserver(hs string) {
 	b.log.Infof("X-Lining homeserver %s", hs)
-	escapedHomeserver := xlineEscape(hs)
-	b.logToChannelf("Would issue: XLINE %d %s :%s", b.config.XLineDuration, escapedHomeserver, b.config.XlineMessage)
+	b.logToChannelf("Would issue: XLINE %d %s :%s", b.config.XLineDuration, generateXLineTarget(hs), b.config.XlineMessage)
+}
+
+func generateXLineTarget(homeserver string) string {
+	return `\@*:` + xlineEscape(strings.TrimSpace(homeserver))
 }
 
 func xlineEscape(s string) string {
