@@ -348,14 +348,17 @@ func (b *Bot) onMatrixConnection(nick, ident, host, ip, realname string) {
 		scanResult.isOpenReg = res
 		scanResult.scanTime = time.Now()
 		scanResult.state = scanComplete
+	} else {
+		b.log.Debugf("scan already exists for %q", hs)
 	}
 
 	if scanResult.state == scanInProgress {
-		b.log.Debugf("Scan for %s already in progress, waiting", hs)
+		b.log.Debugf("Scan for %q already in progress, waiting", hs)
 		<-scanResult.resultWait
 	}
 
 	if scanResult.isOpenReg {
+		b.log.Infof("Homeserver %q is bad (from user %s)", hs, userLog)
 		b.logToChannelf(
 			"BAD: Matrix homeserver %q allows for unverified registration (based on connecting user %s)",
 			hs,
@@ -363,6 +366,8 @@ func (b *Bot) onMatrixConnection(nick, ident, host, ip, realname string) {
 		)
 
 		b.xlineHomeserver(hs)
+	} else {
+		b.log.Infof("Homeserver %q is safe (or errored) (from user %s)", hs, userLog)
 	}
 }
 
