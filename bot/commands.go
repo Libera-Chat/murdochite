@@ -63,9 +63,9 @@ func (b *Bot) statuscmd(a *chatcommand.Argument) error {
 	cacheSize, progress, completed := b.scanStatus()
 
 	a.Replyf(
-		"Bot status: \x02%d\x02 goroutines | \x02%d\x02 cached homeservers | "+
+		"Bot status: Version \x02%s\x02 | \x02%d\x02 goroutines | \x02%d\x02 cached homeservers | "+
 			"\x02%d\x02 scans in progress | \x02%d\x02 scans completed | cache entries cleared after \x02%d\x02 hours",
-		runtime.NumGoroutine(), cacheSize, progress, completed, b.config.ScanTimeoutHours,
+		b.config.Version, runtime.NumGoroutine(), cacheSize, progress, completed, b.config.ScanTimeoutHours,
 	)
 
 	return nil

@@ -11,6 +11,8 @@ import (
 	"github.com/pelletier/go-toml/v2"
 )
 
+var Version = "Unknown"
+
 func main() {
 	//nolint:lll,misspell // cannot be shortened, and I'd love to spell correctly but the dev was apparently american.
 	const format = "%{color}[%{time:15:04:05.0000}] [%{level: -8s}]%{color:reset} [%{module: -15s}] [%{shortfile: -15s}] %{message}"
@@ -31,6 +33,8 @@ func main() {
 		os.Exit(1)
 	}
 
+	config.Version = Version
+	logging.MustGetLogger("main").Infof("Starting version %s...", Version)
 	b := bot.New(&config, logging.MustGetLogger("bot"))
 
 	b.Run(context.Background())

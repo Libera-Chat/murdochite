@@ -81,6 +81,8 @@ type Config struct {
 
 	XLineDuration int    `toml:"xline_duration"`
 	XlineMessage  string `toml:"xline_message"`
+
+	Version string `toml:"-"`
 }
 
 type Bot struct {
