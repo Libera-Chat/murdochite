@@ -11,7 +11,7 @@ import (
 
 func (b *Bot) manualScan(a *chatcommand.Argument) error {
 	hs := strings.TrimSpace(a.Arguments[0])
-	b.logToChannelf("%s requested a manual scan of %q...", a.SourceUser.Name, hs)
+	b.logToChannelf("%s requested a manual scan of %q...", a.SourceUser().Name, hs)
 
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
@@ -83,8 +83,8 @@ func (b *Bot) statuscmd(a *chatcommand.Argument) error {
 }
 
 func (b *Bot) toggleRawLog(a *chatcommand.Argument) error {
-	b.log.Infof("Raw log toggled by %s", a.SourceUser.Mask())
-	b.logToChannelf("Raw log toggled by %s", a.SourceUser.Mask())
+	b.log.Infof("Raw log toggled by %s", a.SourceUser().Mask())
+	b.logToChannelf("Raw log toggled by %s", a.SourceUser().Mask())
 	b.irc.ToggleRawLog()
 	return nil
 }
