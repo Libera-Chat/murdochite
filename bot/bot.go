@@ -284,6 +284,14 @@ func (b *Bot) setupCommands() {
 
 	_ = b.commandHandler.AddCommand("togglerawlog", "toggle console raw log", []string{"bot.admin"}, 0, b.toggleRawLog)
 	_ = b.commandHandler.AddCommand("restart", "restarts the bot", []string{"bot.admin"}, 0, b.restartCmd)
+	_ = b.commandHandler.AddCommand(
+		"getcache",
+		"get the given homeservers from the cache, if they exist\n"+
+			"If no homeserver is provided, the entire cache is dumped",
+		[]string{"bot.status"},
+		-1,
+		b.getCache,
+	)
 
 	b.multiHandler.AddHandlers(b.commandHandler)
 }

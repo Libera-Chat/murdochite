@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -95,4 +96,52 @@ func (b *Bot) restartCmd(*chatcommand.Argument) error {
 	return nil
 }
 
+func (b *Bot) getCache(a *chatcommand.Argument) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if len(a.Arguments) == 0 {
+		keys := make([]string, 0, len(b.cache))
+		for k := range b.cache {
+			keys = append(keys, k)
+		}
+
+		sort.Strings(keys)
+
+		for _, k := range keys {
+			a.Replyf("cache: %s", b.cache[k].IRCString())
+		}
+	}
+
+	for _, name := range a.Arguments {
+		res, exists := b.cache[name]
+		if !exists {
+			a.Replyf("cache: %s does not exist in the cache", name)
+
+			continue
+		}
+
+		a.Replyf("cache: %s", res.IRCString())
+	}
+
+	return nil
+}
+
+// func (b *Bot) dropCache(a *chatcommand.Argument) error {
+// 	if len(a.Arguments) == 0 {
+// 		a.Reply("Refusing to drop entire cache. use DROPCACHE ALL if you want this. If not see HELP DROPCACHE")
+// 	}
+
+// 	b.mu.Lock()
+// 	defer b.mu.Unlock()
+
+// 	for _, name := range a.Arguments {
+// 		exists, ok := b.cache[name]
+// 		_, _ = exists, ok
+// 	}
+
+// 	return nil
+// }
+
 // TODO: getcache, dropcache
+// TODO: bbolt db for hit counts, to store longterm information
