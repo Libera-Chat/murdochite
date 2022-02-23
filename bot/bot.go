@@ -54,7 +54,7 @@ var (
 	}()
 )
 
-type scanResult struct {
+type ScanResult struct {
 	state      scanState
 	homeserver string
 	scanTime   time.Time
@@ -62,7 +62,7 @@ type scanResult struct {
 	resultWait chan struct{}
 }
 
-func (s *scanResult) String() string {
+func (s *ScanResult) String() string {
 	switch s.state {
 	case scanInProgress:
 		return fmt.Sprintf("Homeserver %q is currently being scanned", s.homeserver)
@@ -86,7 +86,7 @@ func (s *scanResult) String() string {
 }
 
 // IRCString is like String() but may include IRC formatting
-func (s *scanResult) IRCString() string {
+func (s *ScanResult) IRCString() string {
 	switch s.state {
 	case scanInProgress:
 		return fmt.Sprintf("Homeserver \x02%q\x02 is currently being scanned", s.homeserver)
@@ -140,7 +140,7 @@ type Bot struct {
 	log        *logging.Logger
 
 	mu       sync.Mutex
-	cache    map[string]*scanResult
+	cache    map[string]*ScanResult
 	badFlows []*set.StringSet
 
 	// Handlers
@@ -183,7 +183,7 @@ func New(config *Config, log *logging.Logger) *Bot {
 		}),
 		ircLogChan: config.LogChannel,
 		log:        log,
-		cache:      make(map[string]*scanResult),
+		cache:      make(map[string]*ScanResult),
 		badFlows:   badflows,
 		config:     config,
 	}
@@ -305,13 +305,17 @@ func (b *Bot) Run(ctx context.Context) {
 	}()
 
 	<-b.ircHandler.WaitFor(numerics.RPL_WELCOME)
+	b.log.Info("Connected")
 
 	go b.cacheLoop(b.irc.DoneChan())
+
+	b.log.Info("Attempting to oper")
 
 	if err := b.oper(); err != nil {
 		b.log.Fatalf("Could not oper up: %s", err)
 	}
 
+	b.log.Info("Opered, joining channels")
 	_ = b.irc.WriteIRC("JOIN", b.ircLogChan)
 
 	b.irc.WaitForExit()
@@ -335,7 +339,7 @@ func (b *Bot) oper() error {
 	return nil
 }
 
-func (b *Bot) homeServerState(homeserver string) (*scanResult, bool) {
+func (b *Bot) homeServerState(homeserver string) (*ScanResult, bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -343,7 +347,7 @@ func (b *Bot) homeServerState(homeserver string) (*scanResult, bool) {
 
 	res, ok := b.cache[lowered]
 	if !ok {
-		newResult := &scanResult{
+		newResult := &ScanResult{
 			homeserver: homeserver,
 			state:      scanInProgress,
 			resultWait: make(chan struct{}),
@@ -410,7 +414,7 @@ func (b *Bot) onMatrixConnection(nick, ident, host, ip, realname string) {
 	b.log.Infof("Homeserver %q is safe (or errored) (from user %s)", hs, userLog)
 }
 
-func (b *Bot) getCacheOrScan(hs string) (res *scanResult, shouldXLine bool, err error) {
+func (b *Bot) getCacheOrScan(hs string) (scanResult *ScanResult, shouldXLine bool, err error) {
 	scanResult, newlyCreated := b.homeServerState(hs)
 
 	if !newlyCreated {
@@ -421,7 +425,7 @@ func (b *Bot) getCacheOrScan(hs string) (res *scanResult, shouldXLine bool, err 
 			<-scanResult.resultWait
 		}
 
-		return res, false, nil
+		return scanResult, false, nil
 	}
 
 	// this was created for us, and thus we need to do a scan
