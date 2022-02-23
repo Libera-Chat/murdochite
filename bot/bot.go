@@ -30,6 +30,7 @@ type scanState int
 const (
 	scanInProgress scanState = iota
 	scanComplete
+	scanDroppedFromCache
 )
 
 //nolint:gochecknoglobals // They're constants but go being go
@@ -59,6 +60,53 @@ type scanResult struct {
 	scanTime   time.Time
 	isOpenReg  bool
 	resultWait chan struct{}
+}
+
+func (s *scanResult) String() string {
+	switch s.state {
+	case scanInProgress:
+		return fmt.Sprintf("Homeserver %q is currently being scanned", s.homeserver)
+
+	case scanComplete:
+		status := "allows unverified registration"
+		if !s.isOpenReg {
+			status = "does not allow unverified registration"
+		}
+
+		return fmt.Sprintf(
+			"Homeserver %q was scanned at %s and %s", s.homeserver, s.scanTime.Format(time.RFC3339Nano), status,
+		)
+
+	case scanDroppedFromCache:
+		return fmt.Sprintf("Homeserver %q is dropped from the cache and is unsafe to use.", s.homeserver)
+
+	default:
+		return "uninitialised scanResult? please report a bug."
+	}
+}
+
+// IRCString is like String() but may include IRC formatting
+func (s *scanResult) IRCString() string {
+	switch s.state {
+	case scanInProgress:
+		return fmt.Sprintf("Homeserver \x02%q\x02 is currently being scanned", s.homeserver)
+
+	case scanComplete:
+		status := "\x02allows unverified registration\x02"
+		if !s.isOpenReg {
+			status = "does \x02not\x02 allow unverified registration"
+		}
+
+		return fmt.Sprintf(
+			"Homeserver \x02%q\x02 was scanned at \x02%s\x02 and %s", s.homeserver, s.scanTime.Format(time.RFC3339Nano), status,
+		)
+
+	case scanDroppedFromCache:
+		return fmt.Sprintf("Homeserver \x02%q\x02 is dropped from the cache and is unsafe to use.", s.homeserver)
+
+	default:
+		return "\x02\x01D\x01Euninitialised scanResult? please report a bug.\x02\x01D\x01E"
+	}
 }
 
 type Config struct {
@@ -324,40 +372,19 @@ func (b *Bot) onMatrixConnection(nick, ident, host, ip, realname string) {
 		return
 	}
 
-	scanResult, newlyCreated := b.homeServerState(hs)
-	if newlyCreated {
-		// this was created for us, and thus we need to do a scan
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
-		defer cancel()
-
-		b.log.Infof("Scanning homeserver %q...", hs)
-		res, err := b.scan(ctx, hs)
-
-		defer close(scanResult.resultWait)
-
-		if err != nil {
-			b.log.Errorf("Could not scan homeserver %q: %s", hs, err)
-
-			if !errors.Is(err, err404) {
-				go b.logToChannelf("ERR: Homeserver %q errored while scanning: %s", hs, err)
-			}
-
-			res = false
-		}
-
-		scanResult.isOpenReg = res
-		scanResult.scanTime = time.Now()
-		scanResult.state = scanComplete
-	} else {
-		b.log.Debugf("scan already exists for %q", hs)
+	result, xlineAllowed, err := b.getCacheOrScan(hs)
+	if err != nil && !errors.Is(err, err404) {
+		b.logToChannelf("ERR: Homeserver %q errored while scanning: %s", hs, err)
 	}
 
-	if scanResult.state == scanInProgress {
-		b.log.Debugf("Scan for %q already in progress, waiting", hs)
-		<-scanResult.resultWait
+	// The state may have changed here if it was dropped from the caches
+	if result.state == scanDroppedFromCache {
+		b.log.Noticef("Scan for %q was dropped from cache. Aborting checks", hs)
+
+		return
 	}
 
-	if scanResult.isOpenReg {
+	if result.isOpenReg {
 		b.log.Infof("Homeserver %q is bad (from user %s)", hs, userLog)
 		b.logToChannelf(
 			"BAD: Matrix homeserver %q allows for unverified registration (based on connecting user %s)",
@@ -365,10 +392,52 @@ func (b *Bot) onMatrixConnection(nick, ident, host, ip, realname string) {
 			userLog,
 		)
 
-		b.xlineHomeserver(hs)
-	} else {
-		b.log.Infof("Homeserver %q is safe (or errored) (from user %s)", hs, userLog)
+		if xlineAllowed {
+			b.xlineHomeserver(hs)
+		}
+
+		return
 	}
+
+	b.log.Infof("Homeserver %q is safe (or errored) (from user %s)", hs, userLog)
+}
+
+func (b *Bot) getCacheOrScan(hs string) (res *scanResult, shouldXLine bool, err error) {
+	scanResult, newlyCreated := b.homeServerState(hs)
+
+	if !newlyCreated {
+		b.log.Debugf("Scan already exists for %q", hs)
+
+		if scanResult.state == scanInProgress {
+			b.log.Debugf("Scan in progress for %q. Waiting...", hs)
+			<-scanResult.resultWait
+		}
+
+		return res, false, nil
+	}
+
+	// this was created for us, and thus we need to do a scan
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
+	defer cancel()
+
+	b.log.Infof("Scanning homeserver %q...", hs)
+	isUnverifiedReg, err := b.scan(ctx, hs)
+
+	defer close(scanResult.resultWait)
+
+	scanResult.isOpenReg = isUnverifiedReg
+	scanResult.scanTime = time.Now()
+	scanResult.state = scanComplete
+
+	if err != nil {
+		b.log.Errorf("Could not scan homeserver %q: %s", hs, err)
+
+		scanResult.isOpenReg = false
+
+		return scanResult, false, err
+	}
+
+	return scanResult, true, nil
 }
 
 func (b *Bot) checkCaches() {
