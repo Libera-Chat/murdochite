@@ -44,40 +44,74 @@ func (b *Bot) manualScan(a *chatcommand.Argument) error {
 	return nil
 }
 
-func (b *Bot) scanStatus() (cacheSize, inProgress, completed, good, bad int) {
-	b.mu.Lock()
-	cacheSize = len(b.cache)
-	inProgress = 0
-	completed = 0
+type botStatus struct {
+	cacheSize       int
+	scansInProgress int
+	completedScans  int
+	goodScans       int
+	badScans        int
+	unknownScans    int
+}
 
-	good, bad = 0, 0
+func (b *Bot) scanStatus() botStatus {
+	b.mu.Lock()
+	cacheSize := len(b.cache)
+	inProgress := 0
+	completed := 0
+
+	good, bad, unknown := 0, 0, 0
 
 	for _, v := range b.cache {
 		switch v.state {
 		case scanInProgress:
 			inProgress++
+
 		case scanComplete:
 			completed++
+
 			if v.isOpenReg {
 				bad++
 			} else {
 				good++
 			}
+
+		case scanDroppedFromCache:
+			unknown++
+
+		default:
+			b.log.Warningf("Unknown scan status %d -- %#v", v.state, v)
+			unknown++
 		}
 	}
 	defer b.mu.Unlock()
 
-	return cacheSize, inProgress, completed, good, bad
+	return botStatus{
+		cacheSize:       cacheSize,
+		scansInProgress: inProgress,
+		completedScans:  completed,
+		goodScans:       good,
+		badScans:        bad,
+		unknownScans:    unknown,
+	}
 }
 
 func (b *Bot) statuscmd(a *chatcommand.Argument) error {
-	cacheSize, progress, completed, good, bad := b.scanStatus()
+	status := b.scanStatus()
 
 	a.Replyf(
 		"Bot status: Version \x02%s\x02 | \x02%d\x02 goroutines | \x02%d\x02 cached homeservers | "+
-			"\x02%d\x02 scans in progress | \x02%d\x02 scans completed (G: %d | B: %d) |"+
-			" cache entries cleared after \x02%d\x02 hours",
-		b.config.Version, runtime.NumGoroutine(), cacheSize, progress, completed, good, bad, b.config.ScanTimeoutHours,
+			"\x02%d\x02 scans in progress | \x02%d\x02 scans completed (G: %d | B: %d | U: %d) |"+
+			" cache entries cleared after \x02%d\x02 hours | Xlines enabled: %t",
+		b.config.Version,
+		runtime.NumGoroutine(),
+		status.cacheSize,
+		status.scansInProgress,
+		status.completedScans,
+		status.goodScans,
+		status.badScans,
+		status.unknownScans,
+		b.config.ScanTimeoutHours,
+		!b.config.LogOnly,
 	)
 
 	return nil
@@ -127,7 +161,7 @@ func (b *Bot) getCache(a *chatcommand.Argument) error {
 	return nil
 }
 
-func (b *Bot) dropCache(a *chatcommand.Argument) error { //nolint:unparam // fits an interface
+func (b *Bot) dropCache(a *chatcommand.Argument) error {
 	if len(a.Arguments) == 0 {
 		a.Reply("Refusing to drop entire cache. use DROPCACHE ALL if you want this. If not see HELP DROPCACHE")
 	}
@@ -161,6 +195,22 @@ func (b *Bot) dropCache(a *chatcommand.Argument) error { //nolint:unparam // fit
 		match.state = scanDroppedFromCache
 		close(match.resultWait)
 	}
+
+	return nil
+}
+
+func (b *Bot) toggleXline(a *chatcommand.Argument) error {
+	newSetting := !b.config.LogOnly
+
+	state := "\x02DISABLED\x02"
+	if newSetting {
+		state = "\x02ENABLED\x02"
+	}
+
+	a.Replyf("Setting X-Lines is now %s!", state)
+	b.logToChannelf("%s (oper %q) has %s Xlines", a.SourceUser().Mask(), a.SourceUser().OperName, state)
+
+	b.config.LogOnly = newSetting
 
 	return nil
 }

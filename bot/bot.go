@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -129,6 +130,7 @@ type Config struct {
 
 	XLineDuration int    `toml:"xline_duration"`
 	XlineMessage  string `toml:"xline_message"`
+	LogOnly       bool   `toml:"log_only"`
 
 	Version string `toml:"-"`
 }
@@ -231,8 +233,6 @@ func (b *Bot) onSnote(d *servernotice.SnoteData) error {
 
 	ip := net.ParseIP(match[ipLoc])
 	if ip == nil {
-		// b.log.Warningf("Unable to parse %q as an IP address", ip)
-
 		return nil
 	}
 
@@ -300,6 +300,8 @@ func (b *Bot) setupCommands() {
 		-1,
 		b.dropCache,
 	)
+
+	_ = b.commandHandler.AddCommand("togglexline", "toggle X-Lining of bad hosts", []string{"bot.admin"}, 0, b.toggleXline)
 
 	b.multiHandler.AddHandlers(b.commandHandler)
 }
@@ -495,7 +497,18 @@ func (b *Bot) scan(ctx context.Context, homeserver string) (bool, error) {
 
 func (b *Bot) xlineHomeserver(hs string) {
 	b.log.Infof("X-Lining homeserver %s", hs)
-	b.logToChannelf("Would issue: XLINE %d %s :%s", b.config.XLineDuration, generateXLineTarget(hs), b.config.XlineMessage)
+	target := generateXLineTarget(hs)
+
+	if b.config.LogOnly {
+		b.logToChannelf("Would issue: XLINE %d %s :%s", b.config.XLineDuration, target, b.config.XlineMessage)
+
+		return
+	}
+
+	if err := b.irc.WriteIRC("XLINE", strconv.Itoa(b.config.XLineDuration), target, b.config.XlineMessage); err != nil {
+		b.log.Errorf("Could not write X-LINE: %s", err)
+		b.logToChannelf("Could not write X-Line: %s", err)
+	}
 }
 
 func generateXLineTarget(homeserver string) string {
@@ -543,6 +556,7 @@ func realnameToHomeserver(realname string) string {
 	return split[len(split)-1]
 }
 
+// Stop stops the bot.
 func (b *Bot) Stop(message string) {
 	b.irc.Stop(message)
 }
