@@ -293,6 +293,14 @@ func (b *Bot) setupCommands() {
 		b.getCache,
 	)
 
+	_ = b.commandHandler.AddCommand(
+		"dropcache",
+		"drop entries from the cache. If you want to drop the entire cache, use \x02DROPCACHE ALL\x02",
+		[]string{"bot.admin"},
+		-1,
+		b.dropCache,
+	)
+
 	b.multiHandler.AddHandlers(b.commandHandler)
 }
 
@@ -390,6 +398,10 @@ func (b *Bot) onMatrixConnection(nick, ident, host, ip, realname string) {
 	}
 
 	// The state may have changed here if it was dropped from the caches
+
+	// XXX: There is a race condition here, where it can be dropped from a cache
+	// XXX: but *after* this check. I dont think its problematic enough to
+	// XXX: warrant actually fixing, but the fix would be a mutex on the obj
 	if result.state == scanDroppedFromCache {
 		b.log.Noticef("Scan for %q was dropped from cache. Aborting checks", hs)
 

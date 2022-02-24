@@ -127,21 +127,42 @@ func (b *Bot) getCache(a *chatcommand.Argument) error {
 	return nil
 }
 
-// func (b *Bot) dropCache(a *chatcommand.Argument) error {
-// 	if len(a.Arguments) == 0 {
-// 		a.Reply("Refusing to drop entire cache. use DROPCACHE ALL if you want this. If not see HELP DROPCACHE")
-// 	}
+func (b *Bot) dropCache(a *chatcommand.Argument) error { //nolint:unparam // fits an interface
+	if len(a.Arguments) == 0 {
+		a.Reply("Refusing to drop entire cache. use DROPCACHE ALL if you want this. If not see HELP DROPCACHE")
+	}
 
-// 	b.mu.Lock()
-// 	defer b.mu.Unlock()
+	b.mu.Lock()
+	defer b.mu.Unlock()
 
-// 	for _, name := range a.Arguments {
-// 		exists, ok := b.cache[name]
-// 		_, _ = exists, ok
-// 	}
+	toDrop := []string{}
 
-// 	return nil
-// }
+	if len(a.Arguments) == 1 && strings.EqualFold(a.Arguments[0], "all") {
+		for k := range b.cache {
+			toDrop = append(toDrop, strings.ToLower(k))
+		}
+	} else {
+		for _, name := range a.Arguments {
+			toDrop = append(toDrop, strings.ToLower(name))
+		}
+	}
 
-// TODO: getcache, dropcache
+	for _, name := range toDrop {
+		match, exists := b.cache[name]
+		if !exists {
+			a.Replyf("\x02%q\x02 does not exist in the cache", name)
+
+			continue
+		}
+
+		a.Replyf("Removing \x02%s\x02 from the cache! (%s)", name, match.IRCString())
+		delete(b.cache, name)
+
+		match.state = scanDroppedFromCache
+		close(match.resultWait)
+	}
+
+	return nil
+}
+
 // TODO: bbolt db for hit counts, to store longterm information
