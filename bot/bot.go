@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"regexp"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -396,7 +397,7 @@ func (b *Bot) onMatrixConnection(nick, ident, host, ip, realname string) {
 
 	result, xlineAllowed, err := b.getCacheOrScan(hs)
 	if err != nil && !errors.Is(err, err404) {
-		b.logToChannelf("ERR: Homeserver %q errored while scanning: %s", hs, err)
+		b.logToChannelf("ERR: Homeserver %q (for %s) errored while scanning: %s", hs, userLog, err)
 	}
 
 	// The state may have changed here if it was dropped from the caches
@@ -499,8 +500,22 @@ func (b *Bot) xlineHomeserver(hs string) {
 	b.log.Infof("X-Lining homeserver %s", hs)
 	target := generateXLineTarget(hs)
 
+	if hs == "" {
+		b.logToChannelf("REFUSING TO BAN EMPTY HOMESERVER! A_DRAGON FIX YOUR SHIT")
+
+		b.log.Critical("refusing to ban empty homeserver")
+		debug.PrintStack()
+		return
+	}
+
 	if b.config.LogOnly {
 		b.logToChannelf("Would issue: XLINE %d %s :%s", b.config.XLineDuration, target, b.config.XlineMessage)
+
+		return
+	}
+
+	if strings.EqualFold(strings.TrimSpace(hs), "matrix.org") {
+		b.logToChannelf("Refusing to X-Line matrix.org")
 
 		return
 	}
