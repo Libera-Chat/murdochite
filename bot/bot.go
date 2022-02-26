@@ -302,7 +302,14 @@ func (b *Bot) setupCommands() {
 		b.dropCache,
 	)
 
-	_ = b.commandHandler.AddCommand("togglexline", "toggle X-Lining of bad hosts", []string{"bot.admin"}, 0, b.toggleXline)
+	_ = b.commandHandler.AddCommand(
+		"togglexline",
+		"toggle X-Lining of bad hosts -- Note that this does \x02MAY NOT\x02 affect cached hosts. "+
+			"A `DROPCACHE ALL` may be helpful after enabling X-Lines, in the case that cached hosts are not being hit",
+		[]string{"bot.admin"},
+		0,
+		b.toggleXline,
+	)
 
 	b.multiHandler.AddHandlers(b.commandHandler)
 }
@@ -435,12 +442,19 @@ func (b *Bot) getCacheOrScan(hs string) (scanResult *ScanResult, shouldXLine boo
 	if !newlyCreated {
 		b.log.Debugf("Scan already exists for %q", hs)
 
+		waited := false
+
 		if scanResult.state == scanInProgress {
 			b.log.Debugf("Scan in progress for %q. Waiting...", hs)
 			<-scanResult.resultWait
+
+			waited = true
 		}
 
-		return scanResult, false, nil
+		// if we didnt wait, then this was in the cache but wasn't scanned right this second,
+		// and thus we should X-Line it
+
+		return scanResult, !waited, nil
 	}
 
 	// this was created for us, and thus we need to do a scan
