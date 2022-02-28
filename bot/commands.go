@@ -34,7 +34,7 @@ func (b *Bot) manualScan(a *chatcommand.Argument) error {
 			)
 		}
 
-		if res.ErrorCode == "M_REGISTRATIONFORBIDDEN" {
+		if res.ErrorCode == "M_FORBIDDEN" {
 			b.logToChannelf(
 				"MANUAL: Reports that registration is forbidden! (\x02%q\x02: \x02%q\x02)", res.ErrorCode, res.Error,
 			)
@@ -46,7 +46,7 @@ func (b *Bot) manualScan(a *chatcommand.Argument) error {
 			b.logToChannelf("MANUAL: Flow %d:  %s", i, strings.Join(flow.Stages, ", "))
 		}
 
-		_, _ = res, err
+		b.logToChannelf("MANUAL: end of results for \x02%q\x02", hs)
 	}()
 
 	return nil
