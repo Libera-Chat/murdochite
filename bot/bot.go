@@ -384,6 +384,10 @@ func (b *Bot) logToChannelf(format string, args ...interface{}) {
 }
 
 func (b *Bot) logToChannel(msg string) {
+	// Just in case.
+	msg = strings.ReplaceAll(msg, "\r", "\\r")
+	msg = strings.ReplaceAll(msg, "\n", "\\n")
+
 	if err := b.irc.SendMessage(b.ircLogChan, msg); err != nil {
 		b.log.Errorf("Unable to log %q to %q: %s", msg, b.ircLogChan, err)
 	}
