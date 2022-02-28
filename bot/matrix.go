@@ -30,6 +30,9 @@ type registerResult struct {
 	Flows   []struct {
 		Stages []string `json:"stages"`
 	} `json:"flows"`
+
+	Error     string `json:"error"`
+	ErrorCode string `json:"errcode"`
 }
 
 func stageMatchesAny(stage []string, toCheck ...*set.StringSet) bool {
