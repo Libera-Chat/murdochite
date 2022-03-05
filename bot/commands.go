@@ -201,7 +201,12 @@ func (b *Bot) dropCache(a *chatcommand.Argument) error {
 		delete(b.cache, name)
 
 		match.state = scanDroppedFromCache
-		close(match.resultWait)
+		select {
+		case <-match.resultWait:
+			// This can only happen if resultWait is closed, so dont close it again
+		default:
+			close(match.resultWait)
+		}
 	}
 
 	return nil
