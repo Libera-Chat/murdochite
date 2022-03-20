@@ -23,7 +23,7 @@ import (
 	"awesome-dragon.science/go/irc/numerics"
 	"awesome-dragon.science/go/irc/oper"
 	operperm "awesome-dragon.science/go/irc/permissions/oper"
-	"awesome-dragon.science/go/murdochite/bot/internal/set"
+	"github.com/Libera-Chat/murdochite/bot/internal/set"
 	"github.com/op/go-logging"
 )
 

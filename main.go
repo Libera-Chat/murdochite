@@ -6,7 +6,7 @@ import (
 	"os"
 	"syscall"
 
-	"awesome-dragon.science/go/murdochite/bot"
+	"github.com/Libera-Chat/murdochite/bot"
 	"github.com/op/go-logging"
 	"github.com/pelletier/go-toml/v2"
 )

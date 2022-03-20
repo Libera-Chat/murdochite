@@ -11,7 +11,7 @@ import (
 	"net/url"
 	"strings"
 
-	"awesome-dragon.science/go/murdochite/bot/internal/set"
+	"github.com/Libera-Chat/murdochite/bot/internal/set"
 	"github.com/op/go-logging"
 )
 

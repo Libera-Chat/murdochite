@@ -1,4 +1,4 @@
-module awesome-dragon.science/go/murdochite
+module github.com/Libera-Chat/murdochite
 
 go 1.17
 
@@ -13,5 +13,3 @@ require (
 	github.com/youmark/pkcs8 v0.0.0-20201027041543-1326539a0a0a // indirect
 	golang.org/x/crypto v0.0.0-20220214200702-86341886e292 // indirect
 )
-
-replace awesome-dragon.science/go/irc => /home/ad/development/go/irc
