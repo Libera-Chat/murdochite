@@ -24,12 +24,12 @@ func main() {
 
 	data, err := os.ReadFile("./config.toml")
 	if err != nil {
-		fmt.Printf("Could not read config file: %s", err)
+		fmt.Printf("Could not read config file: %s\n", err)
 		os.Exit(1)
 	}
 
 	if err := toml.Unmarshal(data, &config); err != nil {
-		fmt.Printf("Could not parse config file: %s", err)
+		fmt.Printf("Could not parse config file: %s\n", err)
 		os.Exit(1)
 	}
 
