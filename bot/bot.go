@@ -338,9 +338,11 @@ func (b *Bot) setupCommands() {
 		"Debug command -- dumps the stack of all goroutines to the log",
 		[]string{"bot.admin"},
 		0,
-		func(*chatcommand.Argument) error {
+		func(a *chatcommand.Argument) error {
 			stack := util.Stack()
-			b.log.Info(stack)
+			b.log.Info(string(stack))
+
+			a.Reply("Stack traces of all goroutines dumped to chat")
 
 			return nil
 		},
