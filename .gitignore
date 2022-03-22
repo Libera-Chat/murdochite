@@ -2,3 +2,7 @@
 murdochite
 *.code-workspace
 go.work
+go.work.sum
+config.toml
+
+.vscode/
