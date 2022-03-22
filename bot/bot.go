@@ -24,6 +24,7 @@ import (
 	"awesome-dragon.science/go/irc/oper"
 	operperm "awesome-dragon.science/go/irc/permissions/oper"
 	"github.com/Libera-Chat/murdochite/bot/internal/set"
+	"github.com/Libera-Chat/murdochite/bot/internal/util"
 	"github.com/op/go-logging"
 )
 
@@ -330,6 +331,19 @@ func (b *Bot) setupCommands() {
 		[]string{"bot.admin"},
 		0,
 		b.toggleXline,
+	)
+
+	_ = b.commandHandler.AddCommand(
+		"dumpstack",
+		"Debug command -- dumps the stack of all goroutines to the log",
+		[]string{"bot.admin"},
+		0,
+		func(*chatcommand.Argument) error {
+			stack := util.Stack()
+			b.log.Info(stack)
+
+			return nil
+		},
 	)
 
 	b.multiHandler.AddHandlers(b.commandHandler)
