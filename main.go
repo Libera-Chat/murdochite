@@ -34,8 +34,13 @@ func main() {
 	}
 
 	config.Version = Version
-	logging.MustGetLogger("main").Infof("Starting version %s...", Version)
-	b := bot.New(&config, logging.MustGetLogger("bot"))
+	mainLogger := logging.MustGetLogger("main")
+	mainLogger.Infof("Starting version %s...", Version)
+
+	b, err := bot.New(&config, logging.MustGetLogger("bot"))
+	if err != nil {
+		mainLogger.Fatalf("Could not instantiate bot: %s", err)
+	}
 
 	b.Run(context.Background())
 

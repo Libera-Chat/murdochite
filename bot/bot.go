@@ -114,13 +114,15 @@ func (s *ScanResult) IRCString() string {
 type Config struct {
 	Connection connection.Config `toml:"connection"`
 
-	Nick             string     `toml:"nick"`
-	Ident            string     `toml:"ident"`
-	Realname         string     `toml:"realname"`
-	ServerPassword   string     `toml:"server_password"`
-	ScanTimeoutHours int        `toml:"scan_timeout_hours"`
-	BadFlows         [][]string `toml:"bad_flows"`
-	LogChannel       string     `toml:"log_channel"`
+	Nick               string     `toml:"nick"`
+	Ident              string     `toml:"ident"`
+	Realname           string     `toml:"realname"`
+	ServerPassword     string     `toml:"server_password"`
+	ScanTimeoutHours   int        `toml:"scan_timeout_hours"`
+	BadFlows           [][]string `toml:"bad_flows"`
+	LogChannel         string     `toml:"log_channel"`
+	VerboseLogChannel  string     `toml:"verbose_log_channel"`
+	VerboseRedirectREs []string   `toml:"verbose_redirect"`
 
 	OperKeyPath   string `toml:"oper_key_path"`
 	OperKeyPasswd string `toml:"oper_key_passwd"`
@@ -137,10 +139,12 @@ type Config struct {
 }
 
 type Bot struct {
-	irc        *client.Client
-	config     *Config
-	ircLogChan string
-	log        *logging.Logger
+	irc            *client.Client
+	config         *Config
+	ircLogChan     string
+	ircVLogChan    string
+	redirectLogREs []*regexp.Regexp
+	log            *logging.Logger
 
 	mu       sync.Mutex
 	cache    map[string]*ScanResult
@@ -156,7 +160,7 @@ type Bot struct {
 }
 
 // New creates a new bot instance.
-func New(config *Config, log *logging.Logger) *Bot {
+func New(config *Config, log *logging.Logger) (*Bot, error) {
 	badflows := []*set.StringSet{}
 
 	for _, f := range config.BadFlows {
@@ -169,6 +173,21 @@ func New(config *Config, log *logging.Logger) *Bot {
 
 	if config.XlineMessage == "" {
 		config.XlineMessage = "Your homeserver appears to allow unverified registration."
+	}
+
+	if config.VerboseLogChannel == "" {
+		config.VerboseLogChannel = config.LogChannel
+	}
+
+	redirectRes := make([]*regexp.Regexp, len(config.VerboseRedirectREs))
+
+	for i, v := range config.VerboseRedirectREs {
+		res, err := regexp.Compile(v)
+		if err != nil {
+			return nil, fmt.Errorf("could not compile regexp %q: %w", v, err)
+		}
+
+		redirectRes[i] = res
 	}
 
 	b := &Bot{
@@ -184,11 +203,13 @@ func New(config *Config, log *logging.Logger) *Bot {
 				"sasl", "account-tag", "solanum.chat/identify-msg", "solanum.chat/oper", "solanum.chat/realhost",
 			},
 		}),
-		ircLogChan: config.LogChannel,
-		log:        log,
-		cache:      make(map[string]*ScanResult),
-		badFlows:   badflows,
-		config:     config,
+		ircLogChan:     config.LogChannel,
+		ircVLogChan:    config.VerboseLogChannel,
+		redirectLogREs: redirectRes,
+		log:            log,
+		cache:          make(map[string]*ScanResult),
+		badFlows:       badflows,
+		config:         config,
 	}
 
 	if b.config.ScanTimeoutHours == 0 {
@@ -198,7 +219,7 @@ func New(config *Config, log *logging.Logger) *Bot {
 	b.setupHandlers()
 	b.setupCommands()
 
-	return b
+	return b, nil
 }
 
 func (b *Bot) setupHandlers() {
@@ -335,6 +356,7 @@ func (b *Bot) Run(ctx context.Context) {
 
 	b.log.Info("Opered, joining channels")
 	_ = b.irc.WriteIRC("JOIN", b.ircLogChan)
+	_ = b.irc.WriteIRC("JOIN", b.ircVLogChan)
 
 	b.irc.WaitForExit()
 }
@@ -388,7 +410,16 @@ func (b *Bot) logToChannel(msg string) {
 	msg = strings.ReplaceAll(msg, "\r", "\\r")
 	msg = strings.ReplaceAll(msg, "\n", "\\n")
 
-	if err := b.irc.SendMessage(b.ircLogChan, msg); err != nil {
+	targetLogChan := b.ircLogChan
+
+	for _, re := range b.redirectLogREs {
+		if re.MatchString(msg) {
+			targetLogChan = b.ircVLogChan
+			break
+		}
+	}
+
+	if err := b.irc.SendMessage(targetLogChan, msg); err != nil {
 		b.log.Errorf("Unable to log %q to %q: %s", msg, b.ircLogChan, err)
 	}
 }
