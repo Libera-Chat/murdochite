@@ -454,10 +454,15 @@ func (b *Bot) onMatrixConnection(nick, ident, host, ip, realname string) {
 	}
 
 	result, xlineAllowed, err := b.getCacheOrScan(hs)
-	if err != nil && !errors.Is(err, err404) {
-		b.logToChannelf("ERR: Homeserver %q (for %s) errored while scanning: %s", hs, userLog, err)
+	if err != nil {
+		switch {
+		case errors.Is(err, err404):
+		case errors.Is(err, context.DeadlineExceeded):
+			b.logToChannelf("ERR: Homeserver %q (for %s) timed out while scanning", hs, userLog)
+		default:
+			b.logToChannelf("ERR: Homeserver %q (for %s) errored while scanning: %s", hs, userLog, err)
+		}
 	}
-
 	// The state may have changed here if it was dropped from the caches
 
 	// XXX: There is a race condition here, where it can be dropped from a cache
