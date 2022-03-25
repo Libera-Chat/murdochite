@@ -215,9 +215,11 @@ func (b *Bot) dropCache(a *chatcommand.Argument) error {
 func (b *Bot) toggleXline(a *chatcommand.Argument) error {
 	newSetting := !b.config.LogOnly
 
-	state := "\x02DISABLED\x02"
+	// if newSetting is FALSE, we've got teeth
+
+	state := "\x02ENABLED\x02"
 	if newSetting {
-		state = "\x02ENABLED\x02"
+		state = "\x02DISABLED\x02"
 	}
 
 	a.Replyf("Setting X-Lines is now %s!", state)
