@@ -18,6 +18,8 @@ func (b *Bot) manualScan(a *chatcommand.Argument) error {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 		defer cancel()
 
+		hs = httpsPrefixIfNotExist(hs)
+
 		delegate, err := b.matrixScanner.GetServerDelegate(ctx, hs)
 		if err == nil {
 			b.logToChannelf(
