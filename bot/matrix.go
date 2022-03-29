@@ -7,9 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/Libera-Chat/murdochite/bot/internal/set"
 	"github.com/op/go-logging"
@@ -23,7 +27,232 @@ const (
 	bigLimit   = 1 << 16
 )
 
-var log = logging.MustGetLogger("matrix")
+var (
+	log        = logging.MustGetLogger("matrix")
+	errNoExist = errors.New("requested resource does not exist")
+)
+
+type delegateCacheEntry struct {
+	target string
+	time   time.Time
+}
+
+// NewMatrixScanner creates a new matrix scanner with the given logger
+func NewMatrixScanner(logger *logging.Logger, cacheTimeout time.Duration) *MatrixScanner {
+	return &MatrixScanner{
+		log:                  logger,
+		delegateCacheTimeout: cacheTimeout,
+		delegateCache:        make(map[string]delegateCacheEntry),
+		dCacheMu:             sync.Mutex{},
+	}
+}
+
+// MatrixScanner provides a frontend to scan matrix servers for bad behaviour
+type MatrixScanner struct {
+	log                  *logging.Logger
+	delegateCacheTimeout time.Duration
+	delegateCache        map[string]delegateCacheEntry
+	dCacheMu             sync.Mutex
+}
+
+// ScanServer asks the given server for its available flows, and returns whether or not any flow matched badFlows
+func (m *MatrixScanner) ScanServer(ctx context.Context, server string, badFlows []*set.StringSet) (bool, error) {
+	server = httpsPrefixIfNotExist(server)
+
+	delegate, err := m.GetServerDelegate(ctx, server)
+	if err != nil {
+		// TODO: Try with the original server anyway
+		return false, fmt.Errorf("could not get delegate server: %w", err)
+	}
+
+	registrationData, err := m.getRegistrationData(ctx, delegate)
+	if err != nil {
+		return false, err
+	}
+
+	for i, f := range registrationData.Flows {
+		log.Debugf("\t %02d: %s", i, strings.Join(f.Stages, ", "))
+	}
+
+	return registrationData.allowsUnverifiedRegistration(badFlows), nil
+}
+
+func (m *MatrixScanner) getRegistrationData(ctx context.Context, server string) (*registerResult, error) {
+	request, err := http.NewRequestWithContext(
+		ctx, "POST", server+registrationEndpoint, strings.NewReader(("{}")),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("could not create request: %w", err)
+	}
+
+	result, err := getClient().Do(request)
+	if err != nil {
+		return nil, fmt.Errorf("unable to make POST request: %w", err)
+	}
+
+	defer result.Body.Close()
+
+	if result.StatusCode == 404 {
+		return nil, err404
+	}
+
+	data, err := io.ReadAll(io.LimitReader(result.Body, bigLimit))
+	if err != nil {
+		return nil, fmt.Errorf("unable to read HTTP body: %w", err)
+	}
+
+	regData := &registerResult{}
+
+	if err := json.Unmarshal(data, regData); err != nil {
+		// The json was somehow invalid, drop the error
+
+		toSend := data
+		if len(toSend) > 128 {
+			toSend = toSend[:128]
+		}
+
+		log.Debugf("Bad json; Data as follows:\n\t%s", toSend)
+
+		return nil, fmt.Errorf("could not unmarshal registration data: %w", err)
+	}
+
+	return regData, nil
+}
+
+func (m *MatrixScanner) getDCache(name string) (delegateCacheEntry, bool) {
+	m.dCacheMu.Lock()
+	defer m.dCacheMu.Unlock()
+
+	res, ok := m.delegateCache[name]
+
+	if ok && time.Since(res.time) >= m.delegateCacheTimeout {
+		// Remove it if it exists and its time is over
+		delete(m.delegateCache, name)
+
+		return delegateCacheEntry{}, false
+	}
+
+	return res, ok
+}
+
+func (m *MatrixScanner) cacheDelegate(name, target string) string {
+	m.dCacheMu.Lock()
+	defer m.dCacheMu.Unlock()
+	m.delegateCache[name] = delegateCacheEntry{
+		target: target,
+		time:   time.Now(),
+	}
+
+	return target
+}
+
+func httpsPrefixIfNotExist(s string) string {
+	if !strings.HasPrefix(s, "http") {
+		return "https://" + s
+	}
+
+	return s
+}
+
+// GetServerDelegate returns the "real" host for a given homeserver
+func (m *MatrixScanner) GetServerDelegate(ctx context.Context, server string) (string, error) {
+	result, httpErr := m.getServerDelegateHTTP(ctx, server)
+	if httpErr == nil {
+		return m.cacheDelegate(server, httpsPrefixIfNotExist(result)), nil
+	}
+
+	m.log.Debugf("HTTP Error when getting server delegate: %q", httpErr)
+
+	result, srvErr := m.getServerDelegateSRV(ctx, server)
+	if srvErr == nil {
+		return m.cacheDelegate(server, httpsPrefixIfNotExist(result)), nil
+	}
+
+	m.log.Debugf("SRV Error when getting server delegate: %q", srvErr)
+
+	// Both errored. We're gonna return our own error unless BOTH responses are errNoExist
+	if errors.Is(httpErr, errNoExist) && errors.Is(srvErr, errNoExist) {
+		return server, nil // Neither of these existed, thus the correct host is the original one
+	}
+
+	if res, ok := m.getDCache(server); ok {
+		m.log.Debugf("%q exists in delegate cache (%q), using that as errors occurred above", server, res)
+
+		return res.target, nil
+	}
+
+	return server, fmt.Errorf("could not find delegate: %w + %v", httpErr, srvErr.Error())
+}
+
+func (m *MatrixScanner) getServerDelegateHTTP(ctx context.Context, server string) (string, error) {
+	target := server + wellKnownFile
+
+	m.log.Debugf("Getting %q", target)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", target, http.NoBody)
+	if err != nil {
+		return "", fmt.Errorf("could not create request: %w", err)
+	}
+
+	res, err := getClient().Do(req)
+	if err != nil {
+		urlErr := &url.Error{}
+
+		ok := errors.As(err, &urlErr)
+		if !ok {
+			return "", fmt.Errorf("unable to execute request: %w", err)
+		}
+
+		// was this because we timed out?
+		if urlErr.Timeout() {
+			// yes, so assume this doesnt exist
+			return "", errNoExist
+		}
+
+		// we didn't timeout, but still errored, so still give the error back
+		return "", fmt.Errorf("unable to execute request: %w", err)
+	}
+
+	defer res.Body.Close()
+
+	if res.StatusCode != 200 {
+		m.log.Debugf("non-200 response from %q: %d (%s)", target, res.StatusCode, res.Status)
+
+		return "", errNoExist
+	}
+
+	// if your response to this is larger than 16384 bytes I have very, very, VERY many questions, but will still bail
+	// regardless.
+	data, err := io.ReadAll(io.LimitReader(res.Body, smallLimit))
+	if err != nil {
+		return "", fmt.Errorf("unable to read all data from request body: %w", err)
+	}
+
+	unmarshalled := &struct {
+		Server string `json:"m.server"` //nolint:tagliatelle // Its spec stuff.
+	}{}
+
+	if err := json.Unmarshal(data, unmarshalled); err != nil {
+		return "", fmt.Errorf("unable to unmarshal JSON: %w", err)
+	}
+
+	return unmarshalled.Server, nil
+}
+
+// Check if the SRV record exists
+func (*MatrixScanner) getServerDelegateSRV(ctx context.Context, server string) (string, error) {
+	_, addrs, err := net.LookupSRV("matrix", "tcp", server)
+	if err != nil {
+		// Yes this kills the other error.
+		return "", fmt.Errorf("%w: %s", errNoExist, fmt.Errorf("unable to lookup SRV: %w", err))
+	}
+
+	if len(addrs) == 0 {
+		return net.JoinHostPort(addrs[0].Target, strconv.Itoa(int(addrs[0].Port))), nil
+	}
+
+	return "", errNoExist
+}
 
 type registerResult struct {
 	Session string `json:"session"`
@@ -65,126 +294,4 @@ func getClient() *http.Client {
 	}
 }
 
-// returns true if the homeserver allows unverified registration
-func badHomeServer(ctx context.Context, location string, badFlows []*set.StringSet) (bool, error) {
-	regData, err := getRegistrationData(ctx, location)
-	if err != nil {
-		return false, err
-	}
-
-	log.Debugf("Homeserver at %s has the following flows:", location)
-
-	for i, f := range regData.Flows {
-		log.Debugf("\t %02d: %s", i, strings.Join(f.Stages, ", "))
-	}
-
-	return regData.allowsUnverifiedRegistration(badFlows), nil
-}
-
 var err404 = errors.New("404 while getting registration")
-
-func getRegistrationData(ctx context.Context, location string) (*registerResult, error) {
-	if !strings.HasPrefix(location, "http") {
-		location = "https://" + location
-	}
-
-	realHomeserverLocation, err := getHomeserverLocation(ctx, location)
-	if err != nil {
-		return nil, fmt.Errorf("unable to get homeserver's true location: %w", err)
-	}
-
-	log.Debugf("Real location: %q", realHomeserverLocation)
-
-	req, err := http.NewRequestWithContext(
-		ctx, "POST", realHomeserverLocation+registrationEndpoint, strings.NewReader("{}"),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("unable to create request: %w", err)
-	}
-
-	res, err := getClient().Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("unable to make POST request: %w", err)
-	}
-
-	if res.StatusCode == 404 {
-		return nil, err404
-	}
-
-	defer res.Body.Close()
-
-	data, err := io.ReadAll(io.LimitReader(res.Body, bigLimit))
-	if err != nil {
-		return nil, fmt.Errorf("unable to read HTTP body: %w", err)
-	}
-
-	regData := &registerResult{}
-
-	if err := json.Unmarshal(data, regData); err != nil {
-		// The json was somehow invalid, drop the error
-
-		toSend := data
-		if len(toSend) > 128 {
-			toSend = toSend[:128]
-		}
-
-		log.Debugf("Bad json; Data as follows:\n\t%s", toSend)
-
-		return nil, fmt.Errorf("could not unmarshal registration data: %w", err)
-	}
-
-	return regData, nil
-}
-
-func getHomeserverLocation(ctx context.Context, location string) (string, error) {
-	log.Debugf("Getting %q\n", location+wellKnownFile)
-
-	request, err := http.NewRequestWithContext(ctx, "GET", location+wellKnownFile, http.NoBody)
-	if err != nil {
-		return "", fmt.Errorf("unable to create request: %w", err)
-	}
-
-	result, err := getClient().Do(request)
-	if err != nil {
-		urlErr := &url.Error{}
-
-		ok := errors.As(err, &urlErr)
-		if !ok {
-			return "", fmt.Errorf("unable to execute request: %w", err)
-		}
-
-		// was this because we timed out?
-		if urlErr.Timeout() {
-			// yes, so assume this doesnt exist
-			return location, nil
-		}
-
-		// we didnt timeout, but still errored, so still give the error back
-		return "", fmt.Errorf("unable to execute request: %w", err)
-	}
-
-	defer result.Body.Close()
-
-	if result.StatusCode != 200 {
-		log.Debugf("Assuming %q has no well known for location", location)
-
-		return location, nil
-	}
-
-	// if your response to this is larger than 16384 bytes I have very, very, VERY many questions, but will still bail
-	// regardless.
-	data, err := io.ReadAll(io.LimitReader(result.Body, smallLimit))
-	if err != nil {
-		return "", fmt.Errorf("unable to read all data from request body: %w", err)
-	}
-
-	unmarshalled := &struct {
-		Server string `json:"m.server"` //nolint:tagliatelle // Its spec stuff.
-	}{}
-
-	if err := json.Unmarshal(data, unmarshalled); err != nil {
-		return "", fmt.Errorf("unable to unmarshal JSON: %w", err)
-	}
-
-	return "https://" + unmarshalled.Server, nil
-}
