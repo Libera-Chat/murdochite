@@ -63,6 +63,7 @@ type ScanResult struct {
 	scanTime   time.Time
 	isOpenReg  bool
 	resultWait chan struct{}
+	// TODO: store the error on this struct for the log and later inspection
 }
 
 func (s *ScanResult) String() string {
