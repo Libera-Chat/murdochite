@@ -141,7 +141,7 @@ func getHomeserverLocation(ctx context.Context, location string) (string, error)
 
 	request, err := http.NewRequestWithContext(ctx, "GET", location+wellKnownFile, http.NoBody)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("unable to create request: %w", err)
 	}
 
 	result, err := getClient().Do(request)
@@ -150,7 +150,7 @@ func getHomeserverLocation(ctx context.Context, location string) (string, error)
 
 		ok := errors.As(err, &urlErr)
 		if !ok {
-			return "", err
+			return "", fmt.Errorf("unable to execute request: %w", err)
 		}
 
 		// was this because we timed out?
@@ -158,8 +158,9 @@ func getHomeserverLocation(ctx context.Context, location string) (string, error)
 			// yes, so assume this doesnt exist
 			return location, nil
 		}
+
 		// we didnt timeout, but still errored, so still give the error back
-		return "", err
+		return "", fmt.Errorf("unable to execute request: %w", err)
 	}
 
 	defer result.Body.Close()
@@ -174,15 +175,15 @@ func getHomeserverLocation(ctx context.Context, location string) (string, error)
 	// regardless.
 	data, err := io.ReadAll(io.LimitReader(result.Body, smallLimit))
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("unable to read all data from request body: %w", err)
 	}
 
 	unmarshalled := &struct {
-		Server string `json:"m.server"`
+		Server string `json:"m.server"` //nolint:tagliatelle // Its spec stuff.
 	}{}
 
 	if err := json.Unmarshal(data, unmarshalled); err != nil {
-		return "", err
+		return "", fmt.Errorf("unable to unmarshal JSON: %w", err)
 	}
 
 	return "https://" + unmarshalled.Server, nil
