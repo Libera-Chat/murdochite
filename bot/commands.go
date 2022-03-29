@@ -18,7 +18,14 @@ func (b *Bot) manualScan(a *chatcommand.Argument) error {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 		defer cancel()
 
-		res, err := getRegistrationData(ctx, hs)
+		delegate, err := b.matrixScanner.GetServerDelegate(ctx, hs)
+		if err == nil {
+			b.logToChannelf(
+				"MANUAL: Note that requested hs %q has delegated stuff to %q, try scanning that?", hs, delegate,
+			)
+		}
+
+		res, err := b.matrixScanner.getRegistrationData(ctx, hs)
 		if err != nil {
 			b.logToChannelf("Error while performing manual scan: %s", err)
 

@@ -147,9 +147,10 @@ type Bot struct {
 	redirectLogREs []*regexp.Regexp
 	log            *logging.Logger
 
-	mu       sync.Mutex
-	cache    map[string]*ScanResult
-	badFlows []*set.StringSet
+	mu            sync.Mutex
+	cache         map[string]*ScanResult
+	badFlows      []*set.StringSet
+	matrixScanner *MatrixScanner
 
 	// Handlers
 	multiHandler   *multi.Handler
@@ -209,6 +210,7 @@ func New(config *Config, log *logging.Logger) (*Bot, error) {
 		redirectLogREs: redirectRes,
 		log:            log,
 		cache:          make(map[string]*ScanResult),
+		matrixScanner:  NewMatrixScanner(logging.MustGetLogger("mtrx-scan"), time.Hour*24),
 		badFlows:       badflows,
 		config:         config,
 	}
@@ -563,7 +565,8 @@ func (b *Bot) cacheLoop(stop <-chan struct{}) {
 }
 
 func (b *Bot) scan(ctx context.Context, homeserver string) (bool, error) {
-	return badHomeServer(ctx, homeserver, b.badFlows)
+	return b.matrixScanner.ScanServer(ctx, homeserver, b.badFlows)
+	// return badHomeServer(ctx, homeserver, b.badFlows)
 }
 
 func (b *Bot) xlineHomeserver(hs string) {
