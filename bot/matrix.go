@@ -78,7 +78,9 @@ func (m *MatrixScanner) ScanServer(ctx context.Context, server string, badFlows 
 		log.Debugf("\t %02d: %s", i, strings.Join(f.Stages, ", "))
 	}
 
-	if len(registrationData.Flows) == 0 {
+	if registrationData.Error != "" {
+		log.Debugf("Error returned: %q: %s", registrationData.ErrorCode, registrationData.Error)
+	} else if len(registrationData.Flows) == 0 {
 		log.Debugf("\t xx: Has no listed registration flows?")
 		log.Debugf("\t xx: %#v", registrationData)
 	}
