@@ -65,6 +65,10 @@ func (m *MatrixScanner) ScanServer(ctx context.Context, server string, badFlows 
 		return false, fmt.Errorf("could not get delegate server: %w", err)
 	}
 
+	if delegate != server {
+		m.log.Debugf("homeserver %q delegates requests to %q", server, delegate)
+	}
+
 	registrationData, err := m.getRegistrationData(ctx, delegate)
 	if err != nil {
 		return false, err
