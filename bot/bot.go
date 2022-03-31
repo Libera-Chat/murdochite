@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"regexp"
 	"runtime/debug"
 	"strconv"
@@ -444,16 +445,34 @@ func (b *Bot) logToChannel(msg string) {
 	}
 }
 
+var (
+	ErrInvalidHSName   = errors.New("invalid homeserver name")
+	ErrHSNameTruncated = errors.New("homeserver name appears truncated")
+	ErrBadRealname     = errors.New("realname does not match expected pattern")
+)
+
 func (b *Bot) onMatrixConnection(nick, ident, host, ip, realname string) {
 	userLog := fmt.Sprintf("%s!%s@%s (%s | %s)", nick, ident, host, ip, realname)
 	b.log.Infof("New matrix connection: %s", userLog)
 
-	hs := realnameToHomeserver(realname)
+	hs, err := b.realnameToHomeserver(realname)
+	if err != nil {
+		b.log.Errorf("Unable to convert %q to homeserver name: %s", realname, err)
+		switch {
+		case errors.Is(err, ErrInvalidHSName):
+			b.logToChannelf("ERR: Invalid homeserver in realname %q (for %s)", realname, userLog)
+		case errors.Is(err, ErrHSNameTruncated):
+			b.logToChannelf("ERR: Homeserver in realname %q appears truncated (for %s)", realname, userLog)
+		default:
+			b.logToChannelf("ERR: %s: %q (for %s)", err, realname, userLog)
+		}
+
+		return
+	}
 
 	if hs == "" {
-		b.log.Errorf("Could not convert %q to homeserver name", realname)
-		b.logToChannelf("ERR: Invalid homeserver in realname %q (for %s)", realname, userLog)
-
+		b.log.Criticalf("Invalid homeserver name returned from homeserverToRealname! source was %q", userLog)
+		b.logToChannel("CRIT: homeserverToRealname returned an empty string and nil error! A_Dragon fix this")
 		return
 	}
 
@@ -631,19 +650,33 @@ func xlineEscape(s string) string {
 	return out.String()
 }
 
-func realnameToHomeserver(realname string) string {
-	// this is started in a goroutine, so we dont return anything here
+func (b *Bot) realnameToHomeserver(realname string) (string, error) {
 	if realname == "" || realname[0] != '@' {
-		return ""
+		return "", fmt.Errorf("%w: realname is empty or does not begin with an @", ErrBadRealname)
 	}
 
 	if !strings.Contains(realname, ":") {
-		return ""
+		return "", fmt.Errorf("%w: realname does not contain a colon", ErrBadRealname)
+	}
+
+	if len(realname) >= 48 {
+		b.logToChannelf("WARN: Suspicious realname length of %d: %q. Dropping", len(realname), realname)
+
+		return "", fmt.Errorf("%w: length of %d", ErrHSNameTruncated, len(realname))
 	}
 
 	split := strings.Split(realname, ":")
+	possible := split[len(split)-1]
 
-	return split[len(split)-1]
+	if !strings.Contains(possible, ".") {
+		return "", fmt.Errorf("%w: no dot in URL", ErrInvalidHSName)
+	}
+
+	if _, err := url.Parse(possible); err != nil {
+		return "", fmt.Errorf("%w: realname doesnt pass sanity checks: %s", ErrInvalidHSName, err)
+	}
+
+	return possible, nil
 }
 
 // Stop stops the bot.
