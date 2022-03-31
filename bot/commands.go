@@ -239,4 +239,15 @@ func (b *Bot) toggleXline(a *chatcommand.Argument) error {
 	return nil
 }
 
+func (b *Bot) cmdScannedRanges(a *chatcommand.Argument) error {
+	s := []string{}
+	for _, r := range b.scanRanges {
+		s = append(s, r.String())
+	}
+
+	a.Replyf("Scanned ranges: %s", strings.Join(s, ", "))
+
+	return nil
+}
+
 // TODO: bbolt db for hit counts, to store longterm information
