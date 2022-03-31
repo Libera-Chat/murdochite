@@ -125,10 +125,10 @@ type Config struct {
 	NSUser   string `toml:"ns_user"`
 	NSPasswd string `toml:"ns_passwd"`
 
-	XLineDuration int    `toml:"xline_duration"`
-	XlineMessage  string `toml:"xline_message"`
-	LogOnly       bool   `toml:"log_only"`
-	ScanRanges    []string
+	XLineDuration int      `toml:"xline_duration"`
+	XlineMessage  string   `toml:"xline_message"`
+	LogOnly       bool     `toml:"log_only"`
+	ScanRanges    []string `toml:"scan_ranges"`
 
 	Version string `toml:"-"`
 }
