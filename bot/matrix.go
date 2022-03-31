@@ -187,7 +187,7 @@ func (m *MatrixScanner) GetServerDelegate(ctx context.Context, server string) (s
 	}
 
 	if res, ok := m.getDCache(server); ok {
-		m.log.Debugf("%q exists in delegate cache (%q), using that as errors occurred above", server, res)
+		m.log.Debugf("%q exists in delegate cache (%q), using that as errors occurred above", server, res.target)
 
 		return res.target, nil
 	}
