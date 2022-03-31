@@ -434,11 +434,12 @@ func (b *Bot) logToChannel(msg string) {
 	for _, re := range b.redirectLogREs {
 		if re.MatchString(msg) {
 			targetLogChan = b.ircVLogChan
+
 			break
 		}
 	}
 
-	if err := b.irc.SendMessage(targetLogChan, msg); err != nil {
+	if err := b.irc.SendMessageChunked(targetLogChan, msg); err != nil {
 		b.log.Errorf("Unable to log %q to %q: %s", msg, b.ircLogChan, err)
 	}
 }
