@@ -47,15 +47,6 @@ var (
 	// accountLog = snoteRe.SubexpIndex("account")
 	ipLoc    = snoteRe.SubexpIndex("ip")
 	gecosLoc = snoteRe.SubexpIndex("gecos")
-
-	matrixRange = func() *net.IPNet {
-		_, out, err := net.ParseCIDR("2001:470:69fc:105::/64")
-		if err != nil {
-			panic(err)
-		}
-
-		return out
-	}()
 )
 
 type ScanResult struct {
@@ -137,6 +128,7 @@ type Config struct {
 	XLineDuration int    `toml:"xline_duration"`
 	XlineMessage  string `toml:"xline_message"`
 	LogOnly       bool   `toml:"log_only"`
+	ScanRanges    []string
 
 	Version string `toml:"-"`
 }
@@ -153,6 +145,7 @@ type Bot struct {
 	cache         map[string]*ScanResult
 	badFlows      []*set.StringSet
 	matrixScanner *MatrixScanner
+	scanRanges    []*net.IPNet
 
 	// Handlers
 	multiHandler   *multi.Handler
@@ -194,6 +187,21 @@ func New(config *Config, log *logging.Logger) (*Bot, error) {
 		redirectRes[i] = res
 	}
 
+	scanRanges := []*net.IPNet{}
+
+	if len(config.ScanRanges) == 0 {
+		return nil, errors.New("no ranges to scan provided") //nolint:goerr113 // main error
+	}
+
+	for _, v := range config.ScanRanges {
+		_, n, err := net.ParseCIDR(v)
+		if err != nil {
+			return nil, fmt.Errorf("unable to parse %q as a range: %w", v, err)
+		}
+
+		scanRanges = append(scanRanges, n)
+	}
+
 	b := &Bot{
 		irc: client.New(&client.Config{
 			Connection:     config.Connection,
@@ -215,6 +223,7 @@ func New(config *Config, log *logging.Logger) (*Bot, error) {
 		matrixScanner:  NewMatrixScanner(logging.MustGetLogger("mtrx-scan"), time.Hour*24),
 		badFlows:       badflows,
 		config:         config,
+		scanRanges:     scanRanges,
 	}
 
 	if b.config.ScanTimeoutHours == 0 {
@@ -263,8 +272,18 @@ func (b *Bot) onSnote(d *servernotice.SnoteData) error {
 		return nil
 	}
 
-	if !matrixRange.Contains(ip) {
-		// Not a matrix conn
+	isInRange := false
+
+	for _, r := range b.scanRanges {
+		if r.Contains(ip) {
+			isInRange = true
+
+			break
+		}
+	}
+
+	if !isInRange {
+		// not a matched conn
 		return nil
 	}
 
