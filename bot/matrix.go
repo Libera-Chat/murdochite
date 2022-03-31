@@ -252,7 +252,12 @@ func (m *MatrixScanner) getServerDelegateHTTP(ctx context.Context, server string
 
 // Check if the SRV record exists
 func (*MatrixScanner) getServerDelegateSRV(ctx context.Context, server string) (string, error) {
-	_, addrs, err := net.LookupSRV("matrix", "tcp", server)
+	u, err := url.Parse(server)
+	if err != nil {
+		return "", fmt.Errorf("could not parse %q as URL: %w", server, err)
+	}
+
+	_, addrs, err := net.DefaultResolver.LookupSRV(ctx, "matrix", "tcp", u.Hostname())
 	if err != nil {
 		// Yes this kills the other error.
 		return "", fmt.Errorf("%w: %s", errNoExist, fmt.Errorf("unable to lookup SRV: %w", err))
