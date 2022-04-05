@@ -229,6 +229,7 @@ func New(config *Config, log *logging.Logger) (*Bot, error) {
 		badFlows:       badflows,
 		config:         config,
 		scanRanges:     scanRanges,
+		actions:        actions,
 	}
 
 	if b.config.ScanTimeoutHours == 0 {
