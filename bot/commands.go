@@ -118,7 +118,7 @@ func (b *Bot) statuscmd(a *chatcommand.Argument) error {
 	a.Replyf(
 		"Bot status: Version \x02%s\x02 | \x02%d\x02 goroutines | \x02%d\x02 cached homeservers | "+
 			"\x02%d\x02 scans in progress | \x02%d\x02 scans completed (G: %d | B: %d | U: %d) |"+
-			" cache entries cleared after \x02%d\x02 hours | Xlines enabled: %t",
+			" cache entries cleared after \x02%d\x02 hours |Actions loaded: %d| Actions enabled: %t",
 		b.config.Version,
 		runtime.NumGoroutine(),
 		status.cacheSize,
@@ -128,6 +128,7 @@ func (b *Bot) statuscmd(a *chatcommand.Argument) error {
 		status.badScans,
 		status.unknownScans,
 		b.config.ScanTimeoutHours,
+		len(b.actions),
 		!b.config.LogOnly,
 	)
 
