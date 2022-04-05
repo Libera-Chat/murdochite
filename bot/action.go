@@ -64,6 +64,10 @@ func (k KLineAction) Execute(nick, ident, host, ip, realname, homeserver, accoun
 		return nil, nil
 	}
 
+	if ident == "" {
+		return nil, errors.New("invalid ident") //nolint:goerr113 // I dont want a specific error here
+	}
+
 	var mask string
 	if len(ident) > 0 && ident[0] == '~' {
 		mask = "*@" + ip
