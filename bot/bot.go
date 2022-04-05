@@ -380,6 +380,8 @@ func (b *Bot) setupCommands() {
 		"scannedranges", "lists the source ranges that are scanned", []string{"bot.admin"}, 0, b.cmdScannedRanges,
 	)
 
+	_ = b.commandHandler.AddCommand("listactions", "list all enabled actions", []string{"bot.admin"}, 0, b.cmdListActions)
+
 	b.multiHandler.AddHandlers(b.commandHandler)
 }
 

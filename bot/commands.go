@@ -250,4 +250,12 @@ func (b *Bot) cmdScannedRanges(a *chatcommand.Argument) error {
 	return nil
 }
 
+func (b *Bot) cmdListActions(a *chatcommand.Argument) error {
+	for i, action := range b.actions {
+		a.Replyf("Action %d: %s", i, action)
+	}
+
+	return nil
+}
+
 // TODO: bbolt db for hit counts, to store longterm information

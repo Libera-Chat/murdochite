@@ -14,6 +14,10 @@ type ActionConfig struct {
 	IgnoreSASLed bool   `toml:"ignore_sasl"`
 }
 
+func (a ActionConfig) String() string {
+	return fmt.Sprintf("%q: Duration: %d | IgnoreSASL: %t | Msg: %q", a.Type, a.Duration, a.IgnoreSASLed, a.Message)
+}
+
 func userIsSASL(accountName string) bool {
 	return accountName != "*"
 }
@@ -51,6 +55,7 @@ var ErrOnlyMatchScannedUser = errors.New("acts on scanned users only")
 // Action is any action that can be taken on a scanned user.
 type Action interface {
 	Execute(nick, ident, host, ip, realname, homeserver, account string, userWasScanned bool) ([]string, error)
+	fmt.Stringer
 }
 
 // KLineAction klines a given user@host
