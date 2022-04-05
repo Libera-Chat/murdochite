@@ -59,7 +59,7 @@ type KLineAction struct {
 }
 
 // Execute implements the Action interface
-func (k KLineAction) Execute(nick, ident, host, ip, realname, homeserver, account string, userWasScanned bool) ([]string, error) {
+func (k KLineAction) Execute(_, ident, _, ip, _, _, account string, userWasScanned bool) ([]string, error) {
 	if k.IgnoreSASLed && userIsSASL(account) {
 		return nil, nil
 	}
@@ -84,7 +84,7 @@ type XLineAction struct {
 }
 
 // Execute implements the Action interface
-func (x XLineAction) Execute(nick, ident, host, ip, realname, homeserver, account string, userWasScanned bool) ([]string, error) {
+func (x XLineAction) Execute(_, _, _, _, _, homeserver, account string, userWasScanned bool) ([]string, error) {
 	if !userWasScanned {
 		return nil, ErrOnlyMatchScannedUser
 	}
