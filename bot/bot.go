@@ -7,8 +7,6 @@ import (
 	"net"
 	"net/url"
 	"regexp"
-	"runtime/debug"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -40,13 +38,13 @@ const (
 //nolint:gochecknoglobals // They're constants but go being go
 var (
 	//nolint:lll // cant be made shorter
-	snoteRe  = regexp.MustCompile(`^\*{3} Notice -- Client connecting: (?P<nick>\S+) \((?P<ident>[^@]+)@(?P<host>[^)]+)\) \[(?P<ip>\S+)\] \{(?P<class>[^}]+)\} <(?P<account>[^>]+)> \[(?P<gecos>.*)\]$`)
-	nickLoc  = snoteRe.SubexpIndex("nick")
-	identLoc = snoteRe.SubexpIndex("ident")
-	hostLoc  = snoteRe.SubexpIndex("host")
-	// accountLog = snoteRe.SubexpIndex("account")
-	ipLoc    = snoteRe.SubexpIndex("ip")
-	gecosLoc = snoteRe.SubexpIndex("gecos")
+	snoteRe    = regexp.MustCompile(`^\*{3} Notice -- Client connecting: (?P<nick>\S+) \((?P<ident>[^@]+)@(?P<host>[^)]+)\) \[(?P<ip>\S+)\] \{(?P<class>[^}]+)\} <(?P<account>[^>]+)> \[(?P<gecos>.*)\]$`)
+	nickLoc    = snoteRe.SubexpIndex("nick")
+	identLoc   = snoteRe.SubexpIndex("ident")
+	hostLoc    = snoteRe.SubexpIndex("host")
+	accountLoc = snoteRe.SubexpIndex("account")
+	ipLoc      = snoteRe.SubexpIndex("ip")
+	gecosLoc   = snoteRe.SubexpIndex("gecos")
 )
 
 type ScanResult struct {
@@ -125,10 +123,9 @@ type Config struct {
 	NSUser   string `toml:"ns_user"`
 	NSPasswd string `toml:"ns_passwd"`
 
-	XLineDuration int      `toml:"xline_duration"`
-	XlineMessage  string   `toml:"xline_message"`
-	LogOnly       bool     `toml:"log_only"`
-	ScanRanges    []string `toml:"scan_ranges"`
+	Actions    []ActionConfig `toml:"actions"`
+	LogOnly    bool           `toml:"log_only"`
+	ScanRanges []string       `toml:"scan_ranges"`
 
 	Version string `toml:"-"`
 }
@@ -146,6 +143,7 @@ type Bot struct {
 	badFlows      []*set.StringSet
 	matrixScanner *MatrixScanner
 	scanRanges    []*net.IPNet
+	actions       []Action
 
 	// Handlers
 	multiHandler   *multi.Handler
@@ -164,12 +162,19 @@ func New(config *Config, log *logging.Logger) (*Bot, error) {
 		badflows = append(badflows, set.New(f...))
 	}
 
-	if config.XLineDuration == 0 {
-		config.XLineDuration = 60 * 24 * 30 // 1 month
+	if len(config.Actions) == 0 {
+		return nil, fmt.Errorf("no actions enabled")
 	}
 
-	if config.XlineMessage == "" {
-		config.XlineMessage = "Your homeserver appears to allow unverified registration."
+	actions := make([]Action, len(config.Actions))
+
+	for i, ac := range config.Actions {
+		a, err := GetAction(ac)
+		if err != nil {
+			return nil, fmt.Errorf("could not create action %d: %w", i, err)
+		}
+
+		actions[i] = a
 	}
 
 	if config.VerboseLogChannel == "" {
@@ -288,7 +293,7 @@ func (b *Bot) onSnote(d *servernotice.SnoteData) error {
 	}
 
 	go b.onMatrixConnection(
-		match[nickLoc], match[identLoc], match[hostLoc], match[ipLoc], match[gecosLoc],
+		match[nickLoc], match[identLoc], match[hostLoc], match[ipLoc], match[gecosLoc], match[accountLoc],
 	)
 
 	return nil
@@ -474,8 +479,8 @@ var (
 	ErrBadRealname     = errors.New("realname does not match expected pattern")
 )
 
-func (b *Bot) onMatrixConnection(nick, ident, host, ip, realname string) {
-	userLog := fmt.Sprintf("%s!%s@%s (%s | %s)", nick, ident, host, ip, realname)
+func (b *Bot) onMatrixConnection(nick, ident, host, ip, realname, account string) {
+	userLog := fmt.Sprintf("%s!%s@%s (%s | %s | %s)", nick, ident, host, ip, realname, account)
 	b.log.Infof("New matrix connection: %s", userLog)
 
 	hs, err := b.realnameToHomeserver(realname)
@@ -499,7 +504,7 @@ func (b *Bot) onMatrixConnection(nick, ident, host, ip, realname string) {
 		return
 	}
 
-	result, xlineAllowed, err := b.getCacheOrScan(hs)
+	result, userWasScanned, err := b.getCacheOrScan(hs)
 	if err != nil {
 		switch {
 		case errors.Is(err, err404):
@@ -523,19 +528,42 @@ func (b *Bot) onMatrixConnection(nick, ident, host, ip, realname string) {
 	if result.isOpenReg {
 		b.log.Infof("Homeserver %q is bad (from user %s)", hs, userLog)
 		b.logToChannelf(
-			"BAD: Matrix homeserver %q allows for unverified registration (based on connecting user %s)",
-			hs,
-			userLog,
+			"BAD: Matrix homeserver %q allows for unverified registration (based on connecting user %s)", hs, userLog,
 		)
 
-		if xlineAllowed {
-			b.xlineHomeserver(hs)
+		if err := b.executeActions(nick, ident, host, ip, realname, hs, account, userWasScanned); err != nil {
+			b.log.Errorf("could not execute actions: %s", err)
+			b.logToChannelf("ERR: Unable to execute actions: %s", err)
 		}
 
 		return
 	}
 
 	b.log.Infof("Homeserver %q is safe (or errored) (from user %s)", hs, userLog)
+}
+
+func (b *Bot) executeActions(nick, ident, host, ip, realname, homeserver, account string, userWasScanned bool) error {
+	commands := []string{}
+
+	for i, a := range b.actions {
+		c, err := a.Execute(nick, ident, host, ip, realname, homeserver, account, userWasScanned)
+		if err != nil {
+			if errors.Is(err, ErrOnlyMatchScannedUser) {
+				continue
+			}
+
+			return fmt.Errorf("could not execute action %d: %w", i, err)
+		}
+
+		commands = append(commands, c...)
+	}
+
+	// TODO: switch logonly
+	for _, c := range commands {
+		b.logToChannelf("WOULD ISSUE: %q", c)
+	}
+
+	return nil
 }
 
 func (b *Bot) getCacheOrScan(hs string) (scanResult *ScanResult, shouldXLine bool, err error) {
@@ -610,37 +638,6 @@ func (b *Bot) cacheLoop(stop <-chan struct{}) {
 
 func (b *Bot) scan(ctx context.Context, homeserver string) (bool, error) {
 	return b.matrixScanner.ScanServer(ctx, homeserver, b.badFlows)
-	// return badHomeServer(ctx, homeserver, b.badFlows)
-}
-
-func (b *Bot) xlineHomeserver(hs string) {
-	b.log.Infof("X-Lining homeserver %s", hs)
-	target := generateXLineTarget(hs)
-
-	if hs == "" {
-		b.logToChannelf("REFUSING TO BAN EMPTY HOMESERVER! A_DRAGON FIX YOUR SHIT")
-
-		b.log.Critical("refusing to ban empty homeserver")
-		debug.PrintStack()
-		return
-	}
-
-	if b.config.LogOnly {
-		b.logToChannelf("Would issue: XLINE %d %s :%s", b.config.XLineDuration, target, b.config.XlineMessage)
-
-		return
-	}
-
-	if strings.EqualFold(strings.TrimSpace(hs), "matrix.org") {
-		b.logToChannelf("Refusing to X-Line matrix.org")
-
-		return
-	}
-
-	if err := b.irc.WriteIRC("XLINE", strconv.Itoa(b.config.XLineDuration), target, b.config.XlineMessage); err != nil {
-		b.log.Errorf("Could not write X-LINE: %s", err)
-		b.logToChannelf("Could not write X-Line: %s", err)
-	}
 }
 
 func generateXLineTarget(homeserver string) string {

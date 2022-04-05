@@ -12,10 +12,16 @@ oper_key_passwd     = ''
 oper_name           = ''
 ns_user             = ''
 ns_passwd           = ''
-xline_duration      = 0
-xline_message       = ''
 log_only            = true # Disable Teeth
 scan_ranges         = []   # IP ranges that should be checked (as in, connecting users on these IPs)
+
+[[actions]]
+    type        = ''   # kline or xline, the kind of action to take. kline klines EACH user, xline X-Lines the homeserver
+    message     = ''   # the message to use in the action's command (for kline and xline this is what you expect)
+    duration    = 1440 # the duration for the action, in minutes
+    ignore_sasl = true # if true, ignore incoming users if they have used SASL
+
+
 [connection]
     Host                  = ''
     Port                  = ''
