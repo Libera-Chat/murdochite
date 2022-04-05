@@ -222,7 +222,7 @@ func (b *Bot) dropCache(a *chatcommand.Argument) error {
 	return nil
 }
 
-func (b *Bot) toggleXline(a *chatcommand.Argument) error {
+func (b *Bot) toggleActions(a *chatcommand.Argument) error {
 	newSetting := !b.config.LogOnly
 
 	// if newSetting is FALSE, we've got teeth
@@ -232,8 +232,8 @@ func (b *Bot) toggleXline(a *chatcommand.Argument) error {
 		state = "\x02DISABLED\x02"
 	}
 
-	a.Replyf("Setting X-Lines is now %s!", state)
-	b.logToChannelf("%s (oper %q) has %s Xlines", a.SourceUser().Mask(), a.SourceUser().OperName, state)
+	a.Replyf("Executing actions is now %s!", state)
+	b.logToChannelf("%s (oper %q) has %s Action Execution", a.SourceUser().Mask(), a.SourceUser().OperName, state)
 
 	b.config.LogOnly = newSetting
 

@@ -354,12 +354,11 @@ func (b *Bot) setupCommands() {
 	)
 
 	_ = b.commandHandler.AddCommand(
-		"togglexline",
-		"toggle X-Lining of bad hosts -- Note that this does \x02MAY NOT\x02 affect cached hosts. "+
-			"A `DROPCACHE ALL` may be helpful after enabling X-Lines, in the case that cached hosts are not being hit",
+		"toggleaction",
+		"Toggle teeth -- Note that for X-Line actions this does NOT affect cached hosts",
 		[]string{"bot.admin"},
 		0,
-		b.toggleXline,
+		b.toggleActions,
 	)
 
 	_ = b.commandHandler.AddCommand(
