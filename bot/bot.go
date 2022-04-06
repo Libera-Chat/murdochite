@@ -560,9 +560,15 @@ func (b *Bot) executeActions(nick, ident, host, ip, realname, homeserver, accoun
 		commands = append(commands, c...)
 	}
 
-	// TODO: switch logonly
 	for _, c := range commands {
-		b.logToChannelf("WOULD ISSUE: %q", c)
+		if b.config.LogOnly {
+			b.logToChannelf("WOULD ISSUE: %s", c)
+		} else {
+			if _, err := b.irc.WriteString(c); err != nil {
+				log.Errorf("couldnt write command: %s", err)
+				b.logToChannelf("ERR: unable to execute %q: %s", c, err)
+			}
+		}
 	}
 
 	return nil
