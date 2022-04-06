@@ -21,7 +21,7 @@ import (
 
 const (
 	registrationEndpoint = "/_matrix/client/v3/register"
-	wellKnownFile        = "/.well-known/matrix/server"
+	wellKnownFile        = "/.well-known/matrix/client"
 
 	smallLimit = 1 << 14
 	bigLimit   = 1 << 16
@@ -240,7 +240,7 @@ func (m *MatrixScanner) getServerDelegateHTTP(ctx context.Context, server string
 	}
 
 	unmarshalled := &struct {
-		Server string `json:"m.server"` //nolint:tagliatelle // Its spec stuff.
+		Server string `json:"m.homeserver"` //nolint:tagliatelle // Its spec stuff.
 	}{}
 
 	if err := json.Unmarshal(data, unmarshalled); err != nil {
