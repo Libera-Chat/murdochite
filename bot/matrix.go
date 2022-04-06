@@ -251,7 +251,7 @@ func (m *MatrixScanner) getServerDelegateHTTP(ctx context.Context, server string
 }
 
 // Check if the SRV record exists
-func (*MatrixScanner) getServerDelegateSRV(ctx context.Context, server string) (string, error) {
+func (m *MatrixScanner) getServerDelegateSRV(ctx context.Context, server string) (string, error) {
 	u, err := url.Parse(server)
 	if err != nil {
 		return "", fmt.Errorf("could not parse %q as URL: %w", server, err)
@@ -259,8 +259,13 @@ func (*MatrixScanner) getServerDelegateSRV(ctx context.Context, server string) (
 
 	_, addrs, err := net.DefaultResolver.LookupSRV(ctx, "matrix", "tcp", u.Hostname())
 	if err != nil {
-		// Yes this kills the other error.
-		return "", fmt.Errorf("%w: %s", errNoExist, fmt.Errorf("unable to lookup SRV: %w", err))
+		if len(addrs) == 0 {
+			// Yes this kills the other error.
+			return "", fmt.Errorf("%w: %s", errNoExist, fmt.Errorf("unable to lookup SRV: %w", err))
+		}
+
+		// In this case there was at least one valid SRV response, use that, but log the error
+		m.log.Debugf("Got some bad records when looking up SRV for %q: %s (%+[2]v)", server, err)
 	}
 
 	if len(addrs) == 0 {
