@@ -261,7 +261,7 @@ func (m *MatrixScanner) getServerDelegateSRV(ctx context.Context, server string)
 	if err != nil {
 		if len(addrs) == 0 {
 			// Yes this kills the other error.
-			return "", fmt.Errorf("%w: %s", errNoExist, fmt.Errorf("unable to lookup SRV: %w", err))
+			return "", fmt.Errorf("%w: %s", errNoExist, fmt.Errorf("unable to lookup SRV: %w (%+[1]v)", err))
 		}
 
 		// In this case there was at least one valid SRV response, use that, but log the error
