@@ -240,14 +240,16 @@ func (m *MatrixScanner) getServerDelegateHTTP(ctx context.Context, server string
 	}
 
 	unmarshalled := &struct {
-		Server string `json:"m.homeserver"` //nolint:tagliatelle // Its spec stuff.
+		Server struct {
+			URI string `json:"base_url"` //nolint:tagliatelle // Its spec stuff.
+		} `json:"m.homeserver"` //nolint:tagliatelle // Its spec stuff.
 	}{}
 
 	if err := json.Unmarshal(data, unmarshalled); err != nil {
 		return "", fmt.Errorf("unable to unmarshal JSON: %w", err)
 	}
 
-	return unmarshalled.Server, nil
+	return unmarshalled.Server.URI, nil
 }
 
 // Check if the SRV record exists
