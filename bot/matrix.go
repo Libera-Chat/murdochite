@@ -20,8 +20,9 @@ import (
 )
 
 const (
-	registrationEndpoint = "/_matrix/client/v3/register"
-	wellKnownFile        = "/.well-known/matrix/client"
+	registrationEndpoint = "/_matrix/client//register"
+	wellKnownFileClient  = "/.well-known/matrix/client"
+	wellKnownFileServer  = "/.well-known/matrix/server"
 
 	smallLimit = 1 << 14
 	bigLimit   = 1 << 16
@@ -174,23 +175,33 @@ func isSyntaxError(err error) bool {
 
 // GetServerDelegate returns the "real" host for a given homeserver
 func (m *MatrixScanner) GetServerDelegate(ctx context.Context, server string) (string, error) {
-	result, httpErr := m.getServerDelegateHTTP(ctx, server)
-	if httpErr == nil {
-		return m.cacheDelegate(server, httpsPrefixIfNotExist(result)), nil
+	var (
+		httpClientErr error
+		httpServerErr error
+		srvErr        error
+		result        string
+	)
+
+	if result, httpClientErr = m.getServerDelegateHTTPClient(ctx, server); httpClientErr == nil {
+		return result, nil
 	}
 
-	m.log.Debugf("HTTP Error when getting server delegate: %q", httpErr)
+	m.log.Debugf("HTTP Error when getting server delegate /client: %q", httpClientErr)
 
-	result, srvErr := m.getServerDelegateSRV(ctx, server)
-	if srvErr == nil {
+	if result, httpServerErr = m.getServerDelegateHTTPServer(ctx, server); httpServerErr == nil {
+		return result, nil
+	}
+	m.log.Debugf("HTTP Error when getting server delegate /server: %q", httpClientErr)
+
+	if result, srvErr = m.getServerDelegateSRV(ctx, server); srvErr == nil {
 		return m.cacheDelegate(server, httpsPrefixIfNotExist(result)), nil
 	}
 
 	m.log.Debugf("SRV Error when getting server delegate: %q", srvErr)
 
-	// Both errored. We're gonna return our own error unless BOTH responses are errNoExist
-	if (errors.Is(httpErr, errNoExist) || isSyntaxError(httpErr)) && errors.Is(srvErr, errNoExist) {
-		return server, nil // Neither of these existed, thus the correct host is the original one
+	// everyone errored, if its all not-found type things, return the original server
+	if errors.Is(httpClientErr, errNoExist) && errors.Is(httpServerErr, errNoExist) && errors.Is(srvErr, errNoExist) {
+		return server, nil
 	}
 
 	if res, ok := m.getDCache(server); ok {
@@ -199,17 +210,17 @@ func (m *MatrixScanner) GetServerDelegate(ctx context.Context, server string) (s
 		return res.target, nil
 	}
 
-	return server, fmt.Errorf("could not find delegate: %w + %v", httpErr, srvErr.Error())
+	return server, fmt.Errorf("could not find delegate: %w + %v", httpClientErr, srvErr.Error())
 }
 
-func (m *MatrixScanner) getServerDelegateHTTP(ctx context.Context, server string) (string, error) {
-	target := server + wellKnownFile
+func (m *MatrixScanner) fetchPathCtx(ctx context.Context, server, path string) ([]byte, error) {
+	target := server + path
 
 	m.log.Debugf("Getting %q", target)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", target, http.NoBody)
 	if err != nil {
-		return "", fmt.Errorf("could not create request: %w", err)
+		return nil, fmt.Errorf("could not create request: %w", err)
 	}
 
 	res, err := getClient().Do(req)
@@ -218,17 +229,17 @@ func (m *MatrixScanner) getServerDelegateHTTP(ctx context.Context, server string
 
 		ok := errors.As(err, &urlErr)
 		if !ok {
-			return "", fmt.Errorf("unable to execute request: %w", err)
+			return nil, fmt.Errorf("unable to execute request: %w", err)
 		}
 
 		// was this because we timed out?
 		if urlErr.Timeout() {
 			// yes, so assume this doesnt exist
-			return "", errNoExist
+			return nil, errNoExist
 		}
 
 		// we didn't timeout, but still errored, so still give the error back
-		return "", fmt.Errorf("unable to execute request: %w", err)
+		return nil, fmt.Errorf("unable to execute request: %w", err)
 	}
 
 	defer res.Body.Close()
@@ -236,14 +247,23 @@ func (m *MatrixScanner) getServerDelegateHTTP(ctx context.Context, server string
 	if res.StatusCode != 200 {
 		m.log.Debugf("non-200 response from %q: %d (%s)", target, res.StatusCode, res.Status)
 
-		return "", errNoExist
+		return nil, errNoExist
 	}
 
 	// if your response to this is larger than 16384 bytes I have very, very, VERY many questions, but will still bail
 	// regardless.
 	data, err := io.ReadAll(io.LimitReader(res.Body, smallLimit))
 	if err != nil {
-		return "", fmt.Errorf("unable to read all data from request body: %w", err)
+		return nil, fmt.Errorf("unable to read all data from request body: %w", err)
+	}
+
+	return data, nil
+}
+
+func (m *MatrixScanner) getServerDelegateHTTPClient(ctx context.Context, server string) (string, error) {
+	data, err := m.fetchPathCtx(ctx, server, wellKnownFileClient)
+	if err != nil {
+		return "", err
 	}
 
 	unmarshalled := &struct {
@@ -253,10 +273,36 @@ func (m *MatrixScanner) getServerDelegateHTTP(ctx context.Context, server string
 	}{}
 
 	if err := json.Unmarshal(data, unmarshalled); err != nil {
+		if isSyntaxError(err) {
+			// Some hosts return 200 with bad json, dont let that stop us
+			return "", fmt.Errorf("%w: %s", errNoExist, err)
+		}
+
 		return "", fmt.Errorf("unable to unmarshal JSON: %w", err)
 	}
 
 	return unmarshalled.Server.URI, nil
+}
+
+func (m *MatrixScanner) getServerDelegateHTTPServer(ctx context.Context, server string) (string, error) {
+	data, err := m.fetchPathCtx(ctx, server, wellKnownFileClient)
+	if err != nil {
+		return "", err
+	}
+
+	unmarshalled := &struct {
+		URI string `json:"m.server"` //nolint:tagliatelle // Its spec stuff.
+	}{}
+
+	if err := json.Unmarshal(data, unmarshalled); err != nil {
+		if isSyntaxError(err) {
+			// Some hosts return 200 with bad json, dont let that stop us
+			return "", fmt.Errorf("%w: %s", errNoExist, err)
+		}
+		return "", fmt.Errorf("unable to unmarshal JSON: %w", err)
+	}
+
+	return unmarshalled.URI, nil
 }
 
 // Check if the SRV record exists
