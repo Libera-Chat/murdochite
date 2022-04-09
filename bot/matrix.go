@@ -165,6 +165,13 @@ func httpsPrefixIfNotExist(s string) string {
 	return s
 }
 
+// json. you're annoying. if you're going to return special errors, PLEASE make them support is
+func isSyntaxError(err error) bool {
+	syntaxError := &json.SyntaxError{}
+
+	return errors.As(err, &syntaxError)
+}
+
 // GetServerDelegate returns the "real" host for a given homeserver
 func (m *MatrixScanner) GetServerDelegate(ctx context.Context, server string) (string, error) {
 	result, httpErr := m.getServerDelegateHTTP(ctx, server)
@@ -182,7 +189,7 @@ func (m *MatrixScanner) GetServerDelegate(ctx context.Context, server string) (s
 	m.log.Debugf("SRV Error when getting server delegate: %q", srvErr)
 
 	// Both errored. We're gonna return our own error unless BOTH responses are errNoExist
-	if errors.Is(httpErr, errNoExist) && errors.Is(srvErr, errNoExist) {
+	if (errors.Is(httpErr, errNoExist) || isSyntaxError(httpErr)) && errors.Is(srvErr, errNoExist) {
 		return server, nil // Neither of these existed, thus the correct host is the original one
 	}
 
