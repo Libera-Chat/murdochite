@@ -174,10 +174,11 @@ func isSyntaxError(err error) bool {
 }
 
 func errorsAre(errs, toCheck []error) bool {
+outer:
 	for _, err := range errs {
 		for _, cerr := range toCheck {
 			if errors.Is(err, cerr) {
-				continue
+				continue outer
 			}
 		}
 
@@ -225,6 +226,8 @@ func (m *MatrixScanner) GetServerDelegate(ctx context.Context, server string) (s
 
 	// everyone errored, if its all not-found type things, return the original server
 	if errorsAre([]error{httpClientErr, httpServerErr, srvErr}, []error{errNoExist, context.DeadlineExceeded}) {
+		m.log.Debugf("request %q errored in expected ways, returning original name", server)
+
 		return server, nil
 	}
 
@@ -234,7 +237,11 @@ func (m *MatrixScanner) GetServerDelegate(ctx context.Context, server string) (s
 		return res.target, nil
 	}
 
-	return server, fmt.Errorf("could not find delegate: %w + %v", httpClientErr, srvErr.Error())
+	m.log.Debugf("request %q errored in unexpected ways, returning error", server)
+
+	return server, fmt.Errorf(
+		"could not find delegate: C:%w + S:%v + SRV:%v", httpClientErr, httpServerErr, srvErr.Error(),
+	)
 }
 
 func (m *MatrixScanner) fetchPathCtx(ctx context.Context, server, path string) ([]byte, error) {
