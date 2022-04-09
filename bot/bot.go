@@ -475,11 +475,44 @@ func (b *Bot) logToChannel(msg string) {
 	}
 }
 
+func (b *Bot) logToVerboseChannelf(format string, args ...interface{}) {
+	b.logToVerboseChannel(fmt.Sprintf(format, args...))
+}
+
+func (b *Bot) logToVerboseChannel(msg string) {
+	if b.config.VerboseLogChannel == "" {
+		log.Warningf("Unable to verbose log message as channel is not configured: %q", msg)
+		return
+	}
+
+	if err := b.irc.SendMessageChunked(b.config.VerboseLogChannel, msg); err != nil {
+		b.log.Errorf("unable to log %q to %q: %s", msg, b.config.VerboseLogChannel, err)
+	}
+}
+
 var (
 	ErrInvalidHSName   = errors.New("invalid homeserver name")
 	ErrHSNameTruncated = errors.New("homeserver name appears truncated")
 	ErrBadRealname     = errors.New("realname does not match expected pattern")
 )
+
+func (b *Bot) logBadRealname(err error, realname, userLog string) {
+	b.log.Errorf("Unable to convert %q to homeserver name: %s", realname, err)
+
+	switch {
+	case errors.Is(err, ErrBadRealname):
+		b.logToVerboseChannelf("ERR: Realname appears invalid: %s (for %s)", err, userLog)
+
+	case errors.Is(err, ErrInvalidHSName):
+		b.logToVerboseChannelf("ERR: Invalid homeserver in realname %q (for %s)", realname, userLog)
+
+	case errors.Is(err, ErrHSNameTruncated):
+		b.logToVerboseChannelf("ERR: Homeserver in realname %q appears truncated (for %s)", realname, userLog)
+
+	default:
+		b.logToChannelf("ERR: %s: %q (for %s)", err, realname, userLog)
+	}
+}
 
 func (b *Bot) onMatrixConnection(nick, ident, host, ip, realname, account string) {
 	userLog := fmt.Sprintf("%s!%s@%s (%s | %s | %s)", nick, ident, host, ip, realname, account)
@@ -487,15 +520,7 @@ func (b *Bot) onMatrixConnection(nick, ident, host, ip, realname, account string
 
 	hs, err := b.realnameToHomeserver(realname)
 	if err != nil {
-		b.log.Errorf("Unable to convert %q to homeserver name: %s", realname, err)
-		switch {
-		case errors.Is(err, ErrInvalidHSName):
-			b.logToChannelf("ERR: Invalid homeserver in realname %q (for %s)", realname, userLog)
-		case errors.Is(err, ErrHSNameTruncated):
-			b.logToChannelf("ERR: Homeserver in realname %q appears truncated (for %s)", realname, userLog)
-		default:
-			b.logToChannelf("ERR: %s: %q (for %s)", err, realname, userLog)
-		}
+		b.logBadRealname(err, realname, userLog)
 
 		return
 	}
