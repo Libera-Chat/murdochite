@@ -200,7 +200,7 @@ func (m *MatrixScanner) GetServerDelegate(ctx context.Context, server string) (s
 	defer cancel()
 
 	if result, httpClientErr = m.getServerDelegateHTTPClient(clientCtx, server); httpClientErr == nil {
-		return result, nil
+		return m.cacheDelegate(server, httpsPrefixIfNotExist(result)), nil
 	}
 
 	m.log.Debugf("HTTP Error when getting server delegate /client: %q", httpClientErr)
@@ -209,7 +209,7 @@ func (m *MatrixScanner) GetServerDelegate(ctx context.Context, server string) (s
 	defer cancel()
 
 	if result, httpServerErr = m.getServerDelegateHTTPServer(serverCtx, server); httpServerErr == nil {
-		return result, nil
+		return m.cacheDelegate(server, httpsPrefixIfNotExist(result)), nil
 	}
 
 	m.log.Debugf("HTTP Error when getting server delegate /server: %q", httpClientErr)
@@ -285,7 +285,7 @@ func (m *MatrixScanner) fetchPathCtx(ctx context.Context, server, path string) (
 }
 
 func (m *MatrixScanner) getServerDelegateHTTPClient(ctx context.Context, server string) (string, error) {
-	data, err := m.fetchPathCtx(ctx, server, wellKnownFileServer)
+	data, err := m.fetchPathCtx(ctx, server, wellKnownFileClient)
 	if err != nil {
 		return "", err
 	}
@@ -309,7 +309,7 @@ func (m *MatrixScanner) getServerDelegateHTTPClient(ctx context.Context, server 
 }
 
 func (m *MatrixScanner) getServerDelegateHTTPServer(ctx context.Context, server string) (string, error) {
-	data, err := m.fetchPathCtx(ctx, server, wellKnownFileClient)
+	data, err := m.fetchPathCtx(ctx, server, wellKnownFileServer)
 	if err != nil {
 		return "", err
 	}
