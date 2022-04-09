@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	registrationEndpoint = "/_matrix/client//register"
+	registrationEndpoint = "/_matrix/client/r0/register"
 	wellKnownFileClient  = "/.well-known/matrix/client"
 	wellKnownFileServer  = "/.well-known/matrix/server"
 
@@ -261,7 +261,7 @@ func (m *MatrixScanner) fetchPathCtx(ctx context.Context, server, path string) (
 }
 
 func (m *MatrixScanner) getServerDelegateHTTPClient(ctx context.Context, server string) (string, error) {
-	data, err := m.fetchPathCtx(ctx, server, wellKnownFileClient)
+	data, err := m.fetchPathCtx(ctx, server, wellKnownFileServer)
 	if err != nil {
 		return "", err
 	}
