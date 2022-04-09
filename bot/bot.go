@@ -621,7 +621,7 @@ func (b *Bot) getCacheOrScan(hs string) (scanResult *ScanResult, shouldXLine boo
 	}
 
 	// this was created for us, and thus we need to do a scan
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute*2)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute*5)
 	defer cancel()
 
 	b.log.Infof("Scanning homeserver %q...", hs)

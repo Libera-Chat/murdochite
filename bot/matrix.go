@@ -182,18 +182,28 @@ func (m *MatrixScanner) GetServerDelegate(ctx context.Context, server string) (s
 		result        string
 	)
 
-	if result, httpClientErr = m.getServerDelegateHTTPClient(ctx, server); httpClientErr == nil {
+	clientCtx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+
+	if result, httpClientErr = m.getServerDelegateHTTPClient(clientCtx, server); httpClientErr == nil {
 		return result, nil
 	}
 
 	m.log.Debugf("HTTP Error when getting server delegate /client: %q", httpClientErr)
 
-	if result, httpServerErr = m.getServerDelegateHTTPServer(ctx, server); httpServerErr == nil {
+	serverCtx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+
+	if result, httpServerErr = m.getServerDelegateHTTPServer(serverCtx, server); httpServerErr == nil {
 		return result, nil
 	}
+
 	m.log.Debugf("HTTP Error when getting server delegate /server: %q", httpClientErr)
 
-	if result, srvErr = m.getServerDelegateSRV(ctx, server); srvErr == nil {
+	srvCtx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+
+	if result, srvErr = m.getServerDelegateSRV(srvCtx, server); srvErr == nil {
 		return m.cacheDelegate(server, httpsPrefixIfNotExist(result)), nil
 	}
 
