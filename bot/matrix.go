@@ -173,6 +173,20 @@ func isSyntaxError(err error) bool {
 	return errors.As(err, &syntaxError)
 }
 
+func errorsAre(errs, toCheck []error) bool {
+	for _, err := range errs {
+		for _, cerr := range toCheck {
+			if errors.Is(err, cerr) {
+				continue
+			}
+		}
+
+		return false
+	}
+
+	return true
+}
+
 // GetServerDelegate returns the "real" host for a given homeserver
 func (m *MatrixScanner) GetServerDelegate(ctx context.Context, server string) (string, error) {
 	var (
@@ -210,7 +224,7 @@ func (m *MatrixScanner) GetServerDelegate(ctx context.Context, server string) (s
 	m.log.Debugf("SRV Error when getting server delegate: %q", srvErr)
 
 	// everyone errored, if its all not-found type things, return the original server
-	if errors.Is(httpClientErr, errNoExist) && errors.Is(httpServerErr, errNoExist) && errors.Is(srvErr, errNoExist) {
+	if errorsAre([]error{httpClientErr, httpServerErr, srvErr}, []error{errNoExist, context.DeadlineExceeded}) {
 		return server, nil
 	}
 
