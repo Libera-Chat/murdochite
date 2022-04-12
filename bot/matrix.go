@@ -312,6 +312,10 @@ func (m *MatrixScanner) getServerDelegateHTTPClient(ctx context.Context, server 
 		return "", fmt.Errorf("unable to unmarshal JSON: %w", err)
 	}
 
+	if strings.TrimSpace(unmarshalled.Server.URI) == "" {
+		return "", errNoExist
+	}
+
 	return unmarshalled.Server.URI, nil
 }
 
@@ -331,6 +335,10 @@ func (m *MatrixScanner) getServerDelegateHTTPServer(ctx context.Context, server 
 			return "", fmt.Errorf("%w: %s", errNoExist, err)
 		}
 		return "", fmt.Errorf("unable to unmarshal JSON: %w", err)
+	}
+
+	if strings.TrimSpace(unmarshalled.URI) == "" {
+		return "", errNoExist
 	}
 
 	return unmarshalled.URI, nil
