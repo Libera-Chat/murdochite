@@ -1,4 +1,4 @@
-package bot
+package matrix
 
 import (
 	"context"
@@ -28,9 +28,10 @@ const (
 	bigLimit   = 1 << 16
 )
 
+// Errors returned from various bits of machinery
 var (
-	log        = logging.MustGetLogger("matrix")
-	errNoExist = errors.New("requested resource does not exist")
+	ErrNoExist = errors.New("requested resource does not exist")
+	Err404     = errors.New("404 while getting registration") // nolint:errname // It is, you're just bad.
 )
 
 type delegateCacheEntry struct {
@@ -38,9 +39,9 @@ type delegateCacheEntry struct {
 	time   time.Time
 }
 
-// NewMatrixScanner creates a new matrix scanner with the given logger
-func NewMatrixScanner(logger *logging.Logger, cacheTimeout time.Duration) *MatrixScanner {
-	return &MatrixScanner{
+// NewScanner creates a new matrix scanner with the given logger
+func NewScanner(logger *logging.Logger, cacheTimeout time.Duration) *Scanner {
+	return &Scanner{
 		log:                  logger,
 		delegateCacheTimeout: cacheTimeout,
 		delegateCache:        make(map[string]delegateCacheEntry),
@@ -48,8 +49,8 @@ func NewMatrixScanner(logger *logging.Logger, cacheTimeout time.Duration) *Matri
 	}
 }
 
-// MatrixScanner provides a frontend to scan matrix servers for bad behaviour
-type MatrixScanner struct {
+// Scanner provides a frontend to scan matrix servers for bad behaviour
+type Scanner struct {
 	log                  *logging.Logger
 	delegateCacheTimeout time.Duration
 	delegateCache        map[string]delegateCacheEntry
@@ -57,41 +58,71 @@ type MatrixScanner struct {
 }
 
 // ScanServer asks the given server for its available flows, and returns whether or not any flow matched badFlows
-func (m *MatrixScanner) ScanServer(ctx context.Context, server string, badFlows []*set.StringSet) (bool, error) {
-	server = httpsPrefixIfNotExist(server)
-
-	delegate, err := m.GetServerDelegate(ctx, server)
-	if err != nil {
-		// TODO: Try with the original server anyway
-		return false, fmt.Errorf("could not get delegate server: %w", err)
-	}
-
-	if delegate != server {
-		m.log.Debugf("homeserver %q delegates requests to %q", server, delegate)
-	}
-
-	registrationData, err := m.getRegistrationData(ctx, delegate)
+func (m *Scanner) ScanServer(ctx context.Context, server string, badFlows []*set.StringSet) (bool, error) {
+	res, err := m.ScanServerResult(ctx, server)
 	if err != nil {
 		return false, err
 	}
 
+	return res.AllowsUnverifiedRegistration(badFlows), nil
+}
+
+// ScanResult represents the result of a scan made using Scanner. Remarks may contain interesting (to a human)
+// messages regarding the process
+type ScanResult struct {
+	*RegisterResult
+	Homeserver   string
+	Delegate     string
+	DelegateType string
+	Remarks      []string
+}
+
+// ScanServerResult returns a ScanResult for a given server scan, or an Error
+func (m *Scanner) ScanServerResult(ctx context.Context, server string) (*ScanResult, error) {
+	start := time.Now()
+	outResult := &ScanResult{Homeserver: server}
+	server = httpsPrefixIfNotExist(server)
+
+	delegate, delegateType, err := m.GetServerDelegate(ctx, server)
+	if err != nil {
+		// TODO: Try with the original server anyway
+		return nil, fmt.Errorf("could not get delegate server: %w", err)
+	}
+
+	outResult.DelegateType = delegateType
+
+	if delegate != server {
+		m.log.Debugf("homeserver %q delegates requests to %q", server, delegate)
+		outResult.Delegate = delegate
+	}
+
+	registrationData, err := m.getRegistrationData(ctx, delegate)
+	if err != nil {
+		return nil, err
+	}
+
+	outResult.RegisterResult = registrationData
+
 	for i, f := range registrationData.Flows {
-		log.Debugf("\t %02d: %s", i, strings.Join(f.Stages, ", "))
+		m.log.Debugf("\t %02d: %s", i, strings.Join(f.Stages, ", "))
 	}
 
 	if registrationData.Error != "" {
-		log.Debugf("Error returned: %q: %s", registrationData.ErrorCode, registrationData.Error)
+		m.log.Debugf("Error returned: %q: %s", registrationData.ErrorCode, registrationData.Error)
 	} else if len(registrationData.Flows) == 0 {
-		log.Debugf("\t xx: Has no listed registration flows?")
-		log.Debugf("\t xx: %#v", registrationData)
+		m.log.Debugf("\t xx: Has no listed registration flows?")
+		m.log.Debugf("\t xx: %#v", registrationData)
+		outResult.Remarks = append(outResult.Remarks, "Appears to have no registration flows")
 	}
 
-	return registrationData.allowsUnverifiedRegistration(badFlows), nil
+	outResult.Remarks = append(outResult.Remarks, fmt.Sprintf("Scan completed in %s", time.Since(start)))
+
+	return outResult, nil
 }
 
-func (m *MatrixScanner) getRegistrationData(ctx context.Context, server string) (*registerResult, error) {
+func (m *Scanner) getRegistrationData(ctx context.Context, server string) (*RegisterResult, error) {
 	request, err := http.NewRequestWithContext(
-		ctx, "POST", server+registrationEndpoint, strings.NewReader(("{}")),
+		ctx, "POST", server+registrationEndpoint, strings.NewReader("{}"),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("could not create request: %w", err)
@@ -105,7 +136,7 @@ func (m *MatrixScanner) getRegistrationData(ctx context.Context, server string) 
 	defer result.Body.Close()
 
 	if result.StatusCode == 404 {
-		return nil, err404
+		return nil, Err404
 	}
 
 	data, err := io.ReadAll(io.LimitReader(result.Body, bigLimit))
@@ -113,7 +144,7 @@ func (m *MatrixScanner) getRegistrationData(ctx context.Context, server string) 
 		return nil, fmt.Errorf("unable to read HTTP body: %w", err)
 	}
 
-	regData := &registerResult{}
+	regData := &RegisterResult{}
 
 	if err := json.Unmarshal(data, regData); err != nil {
 		// The json was somehow invalid, drop the error
@@ -123,7 +154,7 @@ func (m *MatrixScanner) getRegistrationData(ctx context.Context, server string) 
 			toSend = toSend[:128]
 		}
 
-		log.Debugf("Bad json; Data as follows:\n\t%s", toSend)
+		m.log.Debugf("Bad json; Data as follows:\n\t%s", toSend)
 
 		return nil, fmt.Errorf("could not unmarshal registration data: %w", err)
 	}
@@ -131,7 +162,7 @@ func (m *MatrixScanner) getRegistrationData(ctx context.Context, server string) 
 	return regData, nil
 }
 
-func (m *MatrixScanner) getDCache(name string) (delegateCacheEntry, bool) {
+func (m *Scanner) getDCache(name string) (delegateCacheEntry, bool) {
 	m.dCacheMu.Lock()
 	defer m.dCacheMu.Unlock()
 
@@ -147,7 +178,7 @@ func (m *MatrixScanner) getDCache(name string) (delegateCacheEntry, bool) {
 	return res, ok
 }
 
-func (m *MatrixScanner) cacheDelegate(name, target string) string {
+func (m *Scanner) cacheDelegate(name, target string) string {
 	m.dCacheMu.Lock()
 	defer m.dCacheMu.Unlock()
 	m.delegateCache[name] = delegateCacheEntry{
@@ -189,7 +220,9 @@ outer:
 }
 
 // GetServerDelegate returns the "real" host for a given homeserver
-func (m *MatrixScanner) GetServerDelegate(ctx context.Context, server string) (string, error) {
+func (m *Scanner) GetServerDelegate(ctx context.Context, server string) (
+	delegate string, delegateType string, err error,
+) {
 	var (
 		httpClientErr error
 		httpServerErr error
@@ -201,7 +234,7 @@ func (m *MatrixScanner) GetServerDelegate(ctx context.Context, server string) (s
 	defer cancel()
 
 	if result, httpClientErr = m.getServerDelegateHTTPClient(clientCtx, server); httpClientErr == nil {
-		return m.cacheDelegate(server, httpsPrefixIfNotExist(result)), nil
+		return m.cacheDelegate(server, httpsPrefixIfNotExist(result)), "httpClient", nil
 	}
 
 	m.log.Debugf("HTTP Error when getting server delegate /client: %q", httpClientErr)
@@ -210,7 +243,7 @@ func (m *MatrixScanner) GetServerDelegate(ctx context.Context, server string) (s
 	defer cancel()
 
 	if result, httpServerErr = m.getServerDelegateHTTPServer(serverCtx, server); httpServerErr == nil {
-		return m.cacheDelegate(server, httpsPrefixIfNotExist(result)), nil
+		return m.cacheDelegate(server, httpsPrefixIfNotExist(result)), "httpServer", nil
 	}
 
 	m.log.Debugf("HTTP Error when getting server delegate /server: %q", httpClientErr)
@@ -219,32 +252,32 @@ func (m *MatrixScanner) GetServerDelegate(ctx context.Context, server string) (s
 	defer cancel()
 
 	if result, srvErr = m.getServerDelegateSRV(srvCtx, server); srvErr == nil {
-		return m.cacheDelegate(server, httpsPrefixIfNotExist(result)), nil
+		return m.cacheDelegate(server, httpsPrefixIfNotExist(result)), "SRV", nil
 	}
 
 	m.log.Debugf("SRV Error when getting server delegate: %q", srvErr)
 
 	// everyone errored, if its all not-found type things, return the original server
-	if errorsAre([]error{httpClientErr, httpServerErr, srvErr}, []error{errNoExist, context.DeadlineExceeded}) {
+	if errorsAre([]error{httpClientErr, httpServerErr, srvErr}, []error{ErrNoExist, context.DeadlineExceeded}) {
 		m.log.Debugf("request %q errored in expected ways, returning original name", server)
 
-		return server, nil
+		return server, "", nil
 	}
 
 	if res, ok := m.getDCache(server); ok {
 		m.log.Debugf("%q exists in delegate cache (%q), using that as errors occurred above", server, res.target)
 
-		return res.target, nil
+		return res.target, "cached", nil
 	}
 
 	m.log.Debugf("request %q errored in unexpected ways, returning error", server)
 
-	return server, fmt.Errorf(
+	return server, "errored", fmt.Errorf(
 		"could not find delegate: C:%w + S:%v + SRV:%v", httpClientErr, httpServerErr, srvErr.Error(),
 	)
 }
 
-func (m *MatrixScanner) fetchPathCtx(ctx context.Context, server, path string) ([]byte, error) {
+func (m *Scanner) fetchPathCtx(ctx context.Context, server, path string) ([]byte, error) {
 	target := server + path
 
 	m.log.Debugf("Getting %q", target)
@@ -266,7 +299,7 @@ func (m *MatrixScanner) fetchPathCtx(ctx context.Context, server, path string) (
 		// was this because we timed out?
 		if urlErr.Timeout() {
 			// yes, so assume this doesnt exist
-			return nil, errNoExist
+			return nil, ErrNoExist
 		}
 
 		// we didn't timeout, but still errored, so still give the error back
@@ -278,7 +311,7 @@ func (m *MatrixScanner) fetchPathCtx(ctx context.Context, server, path string) (
 	if res.StatusCode != 200 {
 		m.log.Debugf("non-200 response from %q: %d (%s)", target, res.StatusCode, res.Status)
 
-		return nil, errNoExist
+		return nil, ErrNoExist
 	}
 
 	// if your response to this is larger than 16384 bytes I have very, very, VERY many questions, but will still bail
@@ -291,7 +324,7 @@ func (m *MatrixScanner) fetchPathCtx(ctx context.Context, server, path string) (
 	return data, nil
 }
 
-func (m *MatrixScanner) getServerDelegateHTTPClient(ctx context.Context, server string) (string, error) {
+func (m *Scanner) getServerDelegateHTTPClient(ctx context.Context, server string) (string, error) {
 	data, err := m.fetchPathCtx(ctx, server, wellKnownFileClient)
 	if err != nil {
 		return "", err
@@ -306,20 +339,20 @@ func (m *MatrixScanner) getServerDelegateHTTPClient(ctx context.Context, server 
 	if err := json.Unmarshal(data, unmarshalled); err != nil {
 		if isSyntaxError(err) {
 			// Some hosts return 200 with bad json, dont let that stop us
-			return "", fmt.Errorf("%w: %s", errNoExist, err)
+			return "", fmt.Errorf("%w: %s", ErrNoExist, err)
 		}
 
 		return "", fmt.Errorf("unable to unmarshal JSON: %w", err)
 	}
 
 	if strings.TrimSpace(unmarshalled.Server.URI) == "" {
-		return "", errNoExist
+		return "", ErrNoExist
 	}
 
 	return unmarshalled.Server.URI, nil
 }
 
-func (m *MatrixScanner) getServerDelegateHTTPServer(ctx context.Context, server string) (string, error) {
+func (m *Scanner) getServerDelegateHTTPServer(ctx context.Context, server string) (string, error) {
 	data, err := m.fetchPathCtx(ctx, server, wellKnownFileServer)
 	if err != nil {
 		return "", err
@@ -332,20 +365,20 @@ func (m *MatrixScanner) getServerDelegateHTTPServer(ctx context.Context, server 
 	if err := json.Unmarshal(data, unmarshalled); err != nil {
 		if isSyntaxError(err) {
 			// Some hosts return 200 with bad json, dont let that stop us
-			return "", fmt.Errorf("%w: %s", errNoExist, err)
+			return "", fmt.Errorf("%w: %s", ErrNoExist, err)
 		}
 		return "", fmt.Errorf("unable to unmarshal JSON: %w", err)
 	}
 
 	if strings.TrimSpace(unmarshalled.URI) == "" {
-		return "", errNoExist
+		return "", ErrNoExist
 	}
 
 	return unmarshalled.URI, nil
 }
 
 // Check if the SRV record exists
-func (m *MatrixScanner) getServerDelegateSRV(ctx context.Context, server string) (string, error) {
+func (m *Scanner) getServerDelegateSRV(ctx context.Context, server string) (string, error) {
 	u, err := url.Parse(server)
 	if err != nil {
 		return "", fmt.Errorf("could not parse %q as URL: %w", server, err)
@@ -355,7 +388,7 @@ func (m *MatrixScanner) getServerDelegateSRV(ctx context.Context, server string)
 	if err != nil {
 		if len(addrs) == 0 {
 			// Yes this kills the other error.
-			return "", fmt.Errorf("%w: %s", errNoExist, fmt.Errorf("unable to lookup SRV: %w (%+[1]v)", err))
+			return "", fmt.Errorf("%w: %s", ErrNoExist, fmt.Errorf("unable to lookup SRV: %w (%+[1]v)", err))
 		}
 
 		// In this case there was at least one valid SRV response, use that, but log the error
@@ -366,10 +399,11 @@ func (m *MatrixScanner) getServerDelegateSRV(ctx context.Context, server string)
 		return net.JoinHostPort(addrs[0].Target, strconv.Itoa(int(addrs[0].Port))), nil
 	}
 
-	return "", errNoExist
+	return "", ErrNoExist
 }
 
-type registerResult struct {
+// RegisterResult is the json blob returned from the registration endpoint
+type RegisterResult struct {
 	Session string `json:"session"`
 	Flows   []struct {
 		Stages []string `json:"stages"`
@@ -391,7 +425,9 @@ func stageMatchesAny(stage []string, toCheck ...*set.StringSet) bool {
 	return false
 }
 
-func (r *registerResult) allowsUnverifiedRegistration(badflows []*set.StringSet) bool {
+// AllowsUnverifiedRegistration returns whether or not this result allows for unverified registration based on
+// the passed list of bad flow sets
+func (r *RegisterResult) AllowsUnverifiedRegistration(badflows []*set.StringSet) bool {
 	for _, flow := range r.Flows {
 		if stageMatchesAny(flow.Stages, badflows...) {
 			return true
@@ -408,5 +444,3 @@ func getClient() *http.Client {
 		},
 	}
 }
-
-var err404 = errors.New("404 while getting registration")

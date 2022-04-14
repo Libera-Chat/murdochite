@@ -24,6 +24,7 @@ import (
 	operperm "awesome-dragon.science/go/irc/permissions/oper"
 	"github.com/Libera-Chat/murdochite/bot/internal/set"
 	"github.com/Libera-Chat/murdochite/bot/internal/util"
+	"github.com/Libera-Chat/murdochite/bot/matrix"
 	"github.com/op/go-logging"
 )
 
@@ -141,7 +142,7 @@ type Bot struct {
 	mu            sync.Mutex
 	cache         map[string]*ScanResult
 	badFlows      []*set.StringSet
-	matrixScanner *MatrixScanner
+	matrixScanner *matrix.Scanner
 	scanRanges    []*net.IPNet
 	actions       []Action
 
@@ -225,7 +226,7 @@ func New(config *Config, log *logging.Logger) (*Bot, error) {
 		redirectLogREs: redirectRes,
 		log:            log,
 		cache:          make(map[string]*ScanResult),
-		matrixScanner:  NewMatrixScanner(logging.MustGetLogger("mtrx-scan"), time.Hour*24),
+		matrixScanner:  matrix.NewScanner(logging.MustGetLogger("mtrx-scan"), time.Hour*24),
 		badFlows:       badflows,
 		config:         config,
 		scanRanges:     scanRanges,
@@ -327,7 +328,7 @@ func (b *Bot) setupCommands() {
 	)
 
 	_ = b.commandHandler.AddCommand(
-		"scan", "Check the given homeserver for unverified registration", []string{"bot.scan"}, 1, b.manualScan,
+		"scan", "Check the given homeserver for unverified registration", []string{"bot.scan"}, 1, b.manualScan2,
 	)
 
 	_ = b.commandHandler.AddCommand(
@@ -368,6 +369,7 @@ func (b *Bot) setupCommands() {
 		0,
 		func(a *chatcommand.Argument) error {
 			stack := util.Stack()
+
 			b.log.Info(string(stack))
 
 			a.Reply("Stack traces of all goroutines dumped to chat")
@@ -481,7 +483,7 @@ func (b *Bot) logToVerboseChannelf(format string, args ...interface{}) {
 
 func (b *Bot) logToVerboseChannel(msg string) {
 	if b.config.VerboseLogChannel == "" {
-		log.Warningf("Unable to verbose log message as channel is not configured: %q", msg)
+		b.log.Warningf("Unable to verbose log message as channel is not configured: %q", msg)
 		return
 	}
 
@@ -534,7 +536,7 @@ func (b *Bot) onMatrixConnection(nick, ident, host, ip, realname, account string
 	result, userWasScanned, err := b.getCacheOrScan(hs)
 	if err != nil {
 		switch {
-		case errors.Is(err, err404):
+		case errors.Is(err, matrix.Err404):
 		case errors.Is(err, context.DeadlineExceeded):
 			b.logToChannelf("ERR: Homeserver %q (for %s) timed out while scanning", hs, userLog)
 		default:
@@ -590,7 +592,7 @@ func (b *Bot) executeActions(nick, ident, host, ip, realname, homeserver, accoun
 			b.logToChannelf("WOULD ISSUE: %s", c)
 		} else {
 			if _, err := b.irc.WriteString(c); err != nil {
-				log.Errorf("couldnt write command: %s", err)
+				b.log.Errorf("couldnt write command: %s", err)
 				b.logToChannelf("ERR: unable to execute %q: %s", c, err)
 			}
 		}

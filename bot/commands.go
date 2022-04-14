@@ -10,52 +10,48 @@ import (
 	"awesome-dragon.science/go/irc/event/chatcommand"
 )
 
-func (b *Bot) manualScan(a *chatcommand.Argument) error {
+func (b *Bot) manualScan2(a *chatcommand.Argument) error {
+	logChanF := func(s string, a ...interface{}) { b.logToChannelf("MANUAL: "+s, a...) }
 	hs := strings.TrimSpace(a.Arguments[0])
-	b.logToChannelf("%s requested a manual scan of %q...", a.SourceUser().Name, hs)
+
+	b.logToChannelf("%s requested a manual scan of %q...", a.Event.SourceUser.Canonical(), hs)
 
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute*5)
 		defer cancel()
 
-		hs = httpsPrefixIfNotExist(hs)
-
-		delegate, err := b.matrixScanner.GetServerDelegate(ctx, hs)
-		if err == nil {
-			b.logToChannelf(
-				"MANUAL: Note that requested hs %q has delegated stuff to %q, try scanning that?", hs, delegate,
-			)
-		}
-
-		res, err := b.matrixScanner.getRegistrationData(ctx, hs)
+		res, err := b.matrixScanner.ScanServerResult(ctx, hs)
 		if err != nil {
-			b.logToChannelf("Error while performing manual scan: %s", err)
+			logChanF("Errored while scanning: %s", err)
 
 			return
 		}
 
-		b.logToChannelf("MANUAL: Homeserver \x02%q\x02 results follow...", hs)
+		logChanF("Homeserver \x02%s\x02 results follow...", hs)
+		defer logChanF("End of results for \x02%s\x02", hs)
 
-		if res.allowsUnverifiedRegistration(b.badFlows) {
-			b.logToChannelf("MANUAL: Allows unverified registration")
-			b.logToChannelf(
-				"MANUAL: /quote XLINE 1440 %s :Message Here", generateXLineTarget(strings.TrimPrefix(hs, "https://")),
-			)
+		if res.Homeserver != res.Delegate && res.Delegate != "" {
+			logChanF("Homeserver delegates requests to %q (sourced from %s)", res.Delegate, res.DelegateType)
+		}
+
+		if res.AllowsUnverifiedRegistration(b.badFlows) {
+			logChanF("Allows Unverified registration")
+			logChanF("/quote XLINE 1440 %s :Your homeserver appears to allow unverified registration.", generateXLineTarget(hs))
 		}
 
 		if res.ErrorCode == "M_FORBIDDEN" {
-			b.logToChannelf(
-				"MANUAL: Reports that registration is forbidden! (\x02%q\x02: \x02%q\x02)", res.ErrorCode, res.Error,
-			)
+			logChanF("Reports that registration is disabled")
 		} else if res.ErrorCode != "" {
-			b.logToChannelf("MANUAL: Error from server: %q: %q", res.ErrorCode, res.Error)
+			logChanF("Returned an error: %q -- %q", res.ErrorCode, res.Error)
 		}
 
 		for i, flow := range res.Flows {
-			b.logToChannelf("MANUAL: Flow %d:  %s", i, strings.Join(flow.Stages, ", "))
+			logChanF("Flow \x02%02d\x02: %s", i, strings.Join(flow.Stages, ", "))
 		}
 
-		b.logToChannelf("MANUAL: end of results for \x02%q\x02", hs)
+		for i, remark := range res.Remarks {
+			logChanF("Remark \x02%02d\x02: %s", i, remark)
+		}
 	}()
 
 	return nil
