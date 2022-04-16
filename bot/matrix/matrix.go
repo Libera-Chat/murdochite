@@ -96,6 +96,12 @@ func (m *Scanner) ScanServerResult(ctx context.Context, server string) (*ScanRes
 		outResult.Delegate = delegate
 	}
 
+	if trimmed := strings.TrimRight(delegate, "/"); trimmed != delegate {
+		m.log.Debugf("Stripping trailing /s from delegate")
+
+		delegate = trimmed
+	}
+
 	registrationData, err := m.getRegistrationData(ctx, delegate)
 	if err != nil {
 		return nil, err
