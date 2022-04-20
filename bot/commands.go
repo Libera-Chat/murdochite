@@ -239,7 +239,7 @@ func (b *Bot) toggleAction(a *chatcommand.Argument) error {
 		"\x02ENABLED\x02",
 		"\x02DISABLED\x02",
 		res.Enabled(),
-	))
+	), res)
 
 	res.Toggle()
 
