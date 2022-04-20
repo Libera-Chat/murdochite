@@ -35,6 +35,7 @@ Murdochite has three action types, all of which share a standard configuration
 | `message`     | `string` | The message to be passed along for this action (see below) |
 | `duration`    |  `int`   | The number of things enacted by this action (see below)    |
 | `ignore_sasl` |  `bool`  | Whether or not to skip SASLed users (ie, dont ban them)    |
+| `enabled`     |  `bool`  | Startup enable state of this action                        |
 
 
 #### X-Line action (`xline`)
