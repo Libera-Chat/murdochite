@@ -240,8 +240,11 @@ func (b *Bot) toggleAction(a *chatcommand.Argument) error {
 
 	if !ok {
 		a.Replyf("Unknown action %q", name)
+
 		return nil
 	}
+
+	res.Toggle()
 
 	b.logToChannelf("%s{%s} Has %s action %s", a.SourceUser().Mask(), a.SourceUser().OperName, strIf(
 		"\x02ENABLED\x02",
@@ -249,7 +252,7 @@ func (b *Bot) toggleAction(a *chatcommand.Argument) error {
 		res.Enabled(),
 	), res)
 
-	res.Toggle()
+	a.Replyf("%s toggled", name)
 
 	return nil
 }
