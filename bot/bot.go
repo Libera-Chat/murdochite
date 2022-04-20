@@ -126,7 +126,6 @@ type Config struct {
 	NSPasswd string `toml:"ns_passwd"`
 
 	Actions    map[string]ActionConfig `toml:"actions"`
-	LogOnly    bool                    `toml:"log_only"`
 	ScanRanges []string                `toml:"scan_ranges"`
 
 	Version string `toml:"-"`
@@ -617,13 +616,9 @@ func (b *Bot) executeActions(nick, ident, host, ip, realname, homeserver, accoun
 	}
 
 	for _, c := range commands {
-		if b.config.LogOnly {
-			b.logToChannelf("WOULD ISSUE: %s", c)
-		} else {
-			if _, err := b.irc.WriteString(c); err != nil {
-				b.log.Errorf("couldnt write command: %s", err)
-				b.logToChannelf("ERR: unable to execute %q: %s", c, err)
-			}
+		if _, err := b.irc.WriteString(c); err != nil {
+			b.log.Errorf("couldnt write command: %s", err)
+			b.logToChannelf("ERR: unable to execute %q: %s", c, err)
 		}
 	}
 

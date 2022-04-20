@@ -111,10 +111,18 @@ func (b *Bot) scanStatus() botStatus {
 func (b *Bot) statuscmd(a *chatcommand.Argument) error {
 	status := b.scanStatus()
 
+	enabledActions := 0
+
+	for _, a := range b.actions {
+		if a.Enabled() {
+			enabledActions++
+		}
+	}
+
 	a.Replyf(
 		"Bot status: Version \x02%s\x02 | \x02%d\x02 goroutines | \x02%d\x02 cached homeservers | "+
 			"\x02%d\x02 scans in progress | \x02%d\x02 scans completed (G: %d | B: %d | U: %d) |"+
-			" cache entries cleared after \x02%d\x02 hours | Actions loaded: %d | Actions enabled: %t",
+			" cache entries cleared after \x02%d\x02 hours | Actions loaded: %d | Actions enabled: %d",
 		b.config.Version,
 		runtime.NumGoroutine(),
 		status.cacheSize,
@@ -125,7 +133,7 @@ func (b *Bot) statuscmd(a *chatcommand.Argument) error {
 		status.unknownScans,
 		b.config.ScanTimeoutHours,
 		len(b.actions),
-		!b.config.LogOnly,
+		enabledActions,
 	)
 
 	return nil
