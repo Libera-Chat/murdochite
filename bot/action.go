@@ -177,7 +177,10 @@ type WarnAction struct {
 // Execute Implements Action
 func (w *WarnAction) Execute(args *ActionArgs) ([]string, error) {
 	buf := &strings.Builder{}
-	if err := w.template.Execute(buf, args); err != nil {
+	if err := w.template.Execute(buf, struct {
+		ActionArgs
+		ActionConfig
+	}{*args, w.ActionConfig}); err != nil {
 		return nil, fmt.Errorf("could not execute template: %w", err)
 	}
 
