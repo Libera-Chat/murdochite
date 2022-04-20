@@ -149,7 +149,7 @@ func newWarnAction(config ActionConfig) (*WarnAction, error) {
 	templ := template.New("warn_action_message")
 	templ.Funcs(template.FuncMap{
 		"generateXLineTarget": generateXLineTarget,
-		"generateKlineTarget": func(ident, host string) string {
+		"generateKLineTarget": func(ident, host string) string {
 			if len(ident) > 0 && ident[0] != '~' {
 				return fmt.Sprintf("%s@%s", ident, host)
 			}
