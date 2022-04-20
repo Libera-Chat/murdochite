@@ -146,11 +146,7 @@ func (x XLineAction) Execute(args *ActionArgs) ([]string, error) {
 }
 
 func newWarnAction(config ActionConfig) (*WarnAction, error) {
-	templ, err := template.New("warn_action_message").Parse(config.Message)
-	if err != nil {
-		return nil, fmt.Errorf("cannot parse config for warn action: %w", err)
-	}
-
+	templ := template.New("warn_action_message")
 	templ.Funcs(template.FuncMap{
 		"generateXLineTarget": generateXLineTarget,
 		"generateKlineTarget": func(ident, host string) string {
@@ -161,6 +157,10 @@ func newWarnAction(config ActionConfig) (*WarnAction, error) {
 			return fmt.Sprintf("*@%s", host)
 		},
 	})
+
+	if _, err := templ.Parse(config.Message); err != nil {
+		return nil, fmt.Errorf("cannot parse config for warn action: %w", err)
+	}
 
 	return &WarnAction{
 		ActionConfig: config,
