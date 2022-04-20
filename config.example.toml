@@ -15,12 +15,13 @@ ns_passwd           = ''
 log_only            = true # Disable Teeth
 scan_ranges         = []   # IP ranges that should be checked (as in, connecting users on these IPs)
 
-[[actions]]
-    type        = ''   # kline or xline, the kind of action to take. kline klines EACH user, xline X-Lines the homeserver
-    message     = ''   # the message to use in the action's command (for kline and xline this is what you expect)
+
+# actions contains a list of actions to execute
+[actions.name]
+    type        = ''   # kline, xline, or warn, the kind of action to take. kline klines EACH user, xline X-Lines the homeserver
+    message     = ''   # the message to use in the action's command (for kline and xline this is what you expect), for warn this uses a go template
     duration    = 1440 # the duration for the action, in minutes
     ignore_sasl = true # if true, ignore incoming users if they have used SASL
-
 
 [connection]
     Host                  = ''

@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/url"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -124,9 +125,9 @@ type Config struct {
 	NSUser   string `toml:"ns_user"`
 	NSPasswd string `toml:"ns_passwd"`
 
-	Actions    []ActionConfig `toml:"actions"`
-	LogOnly    bool           `toml:"log_only"`
-	ScanRanges []string       `toml:"scan_ranges"`
+	Actions    map[string]ActionConfig `toml:"actions"`
+	LogOnly    bool                    `toml:"log_only"`
+	ScanRanges []string                `toml:"scan_ranges"`
 
 	Version string `toml:"-"`
 }
@@ -144,7 +145,7 @@ type Bot struct {
 	badFlows      []*set.StringSet
 	matrixScanner *matrix.Scanner
 	scanRanges    []*net.IPNet
-	actions       []Action
+	actions       map[string]Action
 
 	// Handlers
 	multiHandler   *multi.Handler
@@ -167,15 +168,17 @@ func New(config *Config, log *logging.Logger) (*Bot, error) {
 		return nil, fmt.Errorf("no actions enabled")
 	}
 
-	actions := make([]Action, len(config.Actions))
+	actions := make(map[string]Action, len(config.Actions))
 
-	for i, ac := range config.Actions {
+	for name, ac := range config.Actions {
+		name = strings.ToLower(name)
+
 		a, err := GetAction(ac)
 		if err != nil {
-			return nil, fmt.Errorf("could not create action %d: %w", i, err)
+			return nil, fmt.Errorf("could not create action %s: %w", name, err)
 		}
 
-		actions[i] = a
+		actions[name] = a
 	}
 
 	if config.VerboseLogChannel == "" {
@@ -356,10 +359,10 @@ func (b *Bot) setupCommands() {
 
 	_ = b.commandHandler.AddCommand(
 		"toggleaction",
-		"Toggle teeth -- Note that for X-Line actions this does NOT affect cached hosts",
+		"Toggle a given action.",
 		[]string{"bot.admin"},
-		0,
-		b.toggleActions,
+		1,
+		b.toggleAction,
 	)
 
 	_ = b.commandHandler.AddCommand(
@@ -382,7 +385,9 @@ func (b *Bot) setupCommands() {
 		"scannedranges", "lists the source ranges that are scanned", []string{"bot.admin"}, 0, b.cmdScannedRanges,
 	)
 
-	_ = b.commandHandler.AddCommand("listactions", "list all enabled actions", []string{"bot.admin"}, 0, b.cmdListActions)
+	_ = b.commandHandler.AddCommand(
+		"listactions", "list all configured actions", []string{"bot.admin"}, 0, b.cmdListActions,
+	)
 
 	b.multiHandler.AddHandlers(b.commandHandler)
 }
@@ -560,7 +565,7 @@ func (b *Bot) onMatrixConnection(nick, ident, host, ip, realname, account string
 			"BAD: Matrix homeserver %q allows for unverified registration (based on connecting user %s)", hs, userLog,
 		)
 
-		if err := b.executeActions(nick, ident, host, ip, realname, hs, account, userWasScanned); err != nil {
+		if err := b.executeActions(nick, ident, host, ip, realname, hs, account, userWasScanned, result); err != nil {
 			b.log.Errorf("could not execute actions: %s", err)
 			b.logToChannelf("ERR: Unable to execute actions: %s", err)
 		}
@@ -571,20 +576,44 @@ func (b *Bot) onMatrixConnection(nick, ident, host, ip, realname, account string
 	b.log.Infof("Homeserver %q is safe (or errored) (from user %s)", hs, userLog)
 }
 
-func (b *Bot) executeActions(nick, ident, host, ip, realname, homeserver, account string, userWasScanned bool) error {
+func (b *Bot) executeActions(nick, ident, host, ip, realname, homeserver, account string, userWasScanned bool, scanResult *ScanResult) error {
 	commands := []string{}
 
-	for i, a := range b.actions {
-		c, err := a.Execute(nick, ident, host, ip, realname, homeserver, account, userWasScanned)
+	keys := make([]string, 0, len(b.actions))
+	for k := range b.actions {
+		keys = append(keys, k)
+	}
+
+	sort.Strings(keys)
+
+	for _, name := range keys {
+		action := b.actions[name]
+		if !action.Enabled() {
+			continue
+		}
+
+		args := &ActionArgs{
+			Nick:           nick,
+			Ident:          ident,
+			Host:           host,
+			Account:        account,
+			IP:             ip,
+			RealName:       realname,
+			HomeServer:     homeserver,
+			UserWasScanned: userWasScanned,
+			Log:            b.logToChannel,
+		}
+
+		res, err := action.Execute(args)
 		if err != nil {
 			if errors.Is(err, ErrOnlyMatchScannedUser) {
 				continue
 			}
 
-			return fmt.Errorf("could not execute action %d: %w", i, err)
+			return fmt.Errorf("could not execute action %s: %w", name, err)
 		}
 
-		commands = append(commands, c...)
+		commands = append(commands, res...)
 	}
 
 	for _, c := range commands {

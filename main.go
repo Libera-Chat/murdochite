@@ -11,7 +11,8 @@ import (
 	"github.com/pelletier/go-toml/v2"
 )
 
-var Version = "Unknown"
+// Version of the bot
+var Version = "Unknown" // nolint:gochecknoglobals // set by the linker
 
 func main() {
 	//nolint:lll,misspell // cannot be shortened, and I'd love to spell correctly but the dev was apparently american.

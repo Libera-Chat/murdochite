@@ -218,20 +218,30 @@ func (b *Bot) dropCache(a *chatcommand.Argument) error {
 	return nil
 }
 
-func (b *Bot) toggleActions(a *chatcommand.Argument) error {
-	newSetting := !b.config.LogOnly
-
-	// if newSetting is FALSE, we've got teeth
-
-	state := "\x02ENABLED\x02"
-	if newSetting {
-		state = "\x02DISABLED\x02"
+func strIf(t, f string, v bool) string {
+	if v {
+		return t
 	}
 
-	a.Replyf("Executing actions is now %s!", state)
-	b.logToChannelf("%s (oper %q) has %s Action Execution", a.SourceUser().Mask(), a.SourceUser().OperName, state)
+	return f
+}
 
-	b.config.LogOnly = newSetting
+func (b *Bot) toggleAction(a *chatcommand.Argument) error {
+	name := strings.ToLower(a.Arguments[0])
+	res, ok := b.actions[name]
+
+	if !ok {
+		a.Replyf("Unknown action %q", name)
+		return nil
+	}
+
+	b.logToChannelf("%s{%s} Has %s action %s", a.SourceUser().Mask(), a.SourceUser().OperName, strIf(
+		"\x02ENABLED\x02",
+		"\x02DISABLED\x02",
+		res.Enabled(),
+	))
+
+	res.Toggle()
 
 	return nil
 }
@@ -248,11 +258,9 @@ func (b *Bot) cmdScannedRanges(a *chatcommand.Argument) error {
 }
 
 func (b *Bot) cmdListActions(a *chatcommand.Argument) error {
-	for i, action := range b.actions {
-		a.Replyf("Action %d: %s", i, action)
+	for name, action := range b.actions {
+		a.Replyf("Action %s: %s", name, action)
 	}
 
 	return nil
 }
-
-// TODO: bbolt db for hit counts, to store longterm information
