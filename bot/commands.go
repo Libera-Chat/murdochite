@@ -270,7 +270,7 @@ func (b *Bot) cmdScannedRanges(a *chatcommand.Argument) error {
 
 func (b *Bot) cmdListActions(a *chatcommand.Argument) error {
 	for name, action := range b.actions {
-		a.Replyf("Action %s: %s", name, action)
+		a.Replyf("Action \x02%s\x02: %s", name, action)
 	}
 
 	return nil

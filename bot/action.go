@@ -32,7 +32,7 @@ type ActionConfig struct {
 
 func (a ActionConfig) String() string {
 	return fmt.Sprintf(
-		"%q: Duration: %d | IgnoreSASL: %t | Msg: %q  | Enabled: %t",
+		"%s Action: Duration: %d | IgnoreSASL: %t | Msg: %q  | Enabled: %t",
 		a.Type,
 		a.Duration,
 		a.IgnoreSASLed,
