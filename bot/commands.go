@@ -269,8 +269,15 @@ func (b *Bot) cmdScannedRanges(a *chatcommand.Argument) error {
 }
 
 func (b *Bot) cmdListActions(a *chatcommand.Argument) error {
-	for name, action := range b.actions {
-		a.Replyf("Action \x02%s\x02: %s", name, action)
+	keys := make([]string, 0, len(b.actions))
+	for k := range b.actions {
+		keys = append(keys, k)
+	}
+
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		a.Replyf("Action \x02%s\x02: %s", key, b.actions[key])
 	}
 
 	return nil
